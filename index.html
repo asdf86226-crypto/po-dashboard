@@ -1770,6 +1770,7 @@ function sharedDocCell(p){
   return out.length ? '<span class="doc-wrap">'+out.join('')+'</span>' : '<span class="dash">-</span>';
 }
 // 공유용 재고 셀 — 숫자(음수는 0으로 보정), null="미등록"(빨강), 빈값/undefined="-"
+// 수량 셀과 동일한 스타일(monospace·가운데정렬·단위없음). 숫자만 표시.
 function sharedStockCell(p){
   if(!p) return '<span class="dash">-</span>';
   if(p.stock === null) return '<span class="stock-none">미등록</span>';
@@ -1777,7 +1778,7 @@ function sharedStockCell(p){
   const n = parseFloat(p.stock);
   if(isNaN(n)) return '<span class="dash">-</span>';
   const shown = n < 0 ? 0 : n;
-  return Number(shown).toLocaleString() + '개';
+  return Number(shown).toLocaleString();
 }
 function buildSharedProgressHtml(){
   const stamp = new Date();
@@ -1796,7 +1797,7 @@ function buildSharedProgressHtml(){
     return '<tr class="item" data-sup="'+sharedEsc(p.supplier||'(공급사 미지정)')+'" data-s="'+sharedEsc(search)+'">'
       + '<td class="nm">'+sharedEsc(p.itemName||'-')+badges+'</td>'
       + '<td class="mono">'+sharedEsc(p.itemCode||'-')+'</td>'
-      + '<td class="mono stock">'+sharedStockCell(p)+'</td>'
+      + '<td class="mono qty">'+sharedStockCell(p)+'</td>'
       + '<td>'+sharedEsc(p.supplier||'-')+'</td>'
       + '<td class="mono qty">'+((p.ciQty && parseFloat(p.ciQty)!==parseFloat(p.qty)) ? ('<span class="qty-old">'+fmtQty(p.qty)+'</span> → <b class="qty-new">'+fmtQty(p.ciQty)+'</b>') : fmtQty(p.ciQty||p.qty))+'</td>'
       + '<td class="mono">'+sharedEsc(p.dueDate||'-')+'</td>'
@@ -1840,7 +1841,7 @@ function buildSharedProgressHtml(){
     return '<tr class="item" data-sup="'+sharedEsc(p.supplier||'(공급사 미지정)')+'" data-s="'+sharedEsc(search)+'">'
       + '<td class="nm">'+sharedEsc(p.itemName||'-')+badges+'</td>'
       + '<td class="mono">'+sharedEsc(p.itemCode||'-')+'</td>'
-      + '<td class="mono stock">'+sharedStockCell(p)+'</td>'
+      + '<td class="mono qty">'+sharedStockCell(p)+'</td>'
       + '<td>'+sharedEsc(p.supplier||'-')+'</td>'
       + '<td class="mono qty">'+qtyDisp+'</td>'
       + '<td class="mono">'+sharedEsc(p.dueDate||'-')+'</td>'
@@ -1892,10 +1893,9 @@ function buildSharedProgressHtml(){
     + '.grp td{background:#dfe7ea;color:#16233d;font-weight:800;font-size:12.5px;padding:9px 12px;border-top:2px solid #16233d;}'
     + '.grp-n{font-weight:700;font-size:11px;color:#4c5a62;margin-left:8px;}'
     + '.mono{font-family:"JetBrains Mono","SF Mono",Consolas,monospace;}'
-    + '.qty{text-align:center;}'
+    + '.qty{text-align:center;min-width:80px;}'
     + '.qty-old{color:#b7b2a3;text-decoration:line-through;font-size:11px;}'
     + '.qty-new{color:#dc2626;font-weight:800;}'
-    + '.stock{text-align:center;color:#4c5a62;}'
     + '.stock-none{color:#dc2626;font-weight:700;font-size:11.5px;}'
     + '.nm{font-weight:700;white-space:normal;min-width:170px;}'
     + '.dash{color:#b7b2a3;}'
