@@ -1769,6 +1769,16 @@ function sharedDocCell(p){
   });
   return out.length ? '<span class="doc-wrap">'+out.join('')+'</span>' : '<span class="dash">-</span>';
 }
+// 공유용 재고 셀 — 숫자(음수는 0으로 보정), null="미등록"(빨강), 빈값/undefined="-"
+function sharedStockCell(p){
+  if(!p) return '<span class="dash">-</span>';
+  if(p.stock === null) return '<span class="stock-none">미등록</span>';
+  if(p.stock === undefined || p.stock === '') return '<span class="dash">-</span>';
+  const n = parseFloat(p.stock);
+  if(isNaN(n)) return '<span class="dash">-</span>';
+  const shown = n < 0 ? 0 : n;
+  return Number(shown).toLocaleString() + '개';
+}
 function buildSharedProgressHtml(){
   const stamp = new Date();
   const rowsSrc = pos.slice().sort(function(a,b){
@@ -1786,6 +1796,7 @@ function buildSharedProgressHtml(){
     return '<tr class="item" data-sup="'+sharedEsc(p.supplier||'(공급사 미지정)')+'" data-s="'+sharedEsc(search)+'">'
       + '<td class="nm">'+sharedEsc(p.itemName||'-')+badges+'</td>'
       + '<td class="mono">'+sharedEsc(p.itemCode||'-')+'</td>'
+      + '<td class="mono stock">'+sharedStockCell(p)+'</td>'
       + '<td>'+sharedEsc(p.supplier||'-')+'</td>'
       + '<td class="mono qty">'+((p.ciQty && parseFloat(p.ciQty)!==parseFloat(p.qty)) ? ('<span class="qty-old">'+fmtQty(p.qty)+'</span> → <b class="qty-new">'+fmtQty(p.ciQty)+'</b>') : fmtQty(p.ciQty||p.qty))+'</td>'
       + '<td class="mono">'+sharedEsc(p.dueDate||'-')+'</td>'
@@ -1806,7 +1817,7 @@ function buildSharedProgressHtml(){
       if(da!==db) return db.localeCompare(da);
       return (a.itemName||'').localeCompare(b.itemName||'');
     });
-    const head = '<tr class="grp" data-sup="'+sharedEsc(sup)+'"><td colspan="10">'+sharedEsc(sup)+' <span class="grp-n">'+items.length+'건</span></td></tr>';
+    const head = '<tr class="grp" data-sup="'+sharedEsc(sup)+'"><td colspan="11">'+sharedEsc(sup)+' <span class="grp-n">'+items.length+'건</span></td></tr>';
     return head + items.map(itemRow).join('');
   }).join('');
 
@@ -1829,6 +1840,7 @@ function buildSharedProgressHtml(){
     return '<tr class="item" data-sup="'+sharedEsc(p.supplier||'(공급사 미지정)')+'" data-s="'+sharedEsc(search)+'">'
       + '<td class="nm">'+sharedEsc(p.itemName||'-')+badges+'</td>'
       + '<td class="mono">'+sharedEsc(p.itemCode||'-')+'</td>'
+      + '<td class="mono stock">'+sharedStockCell(p)+'</td>'
       + '<td>'+sharedEsc(p.supplier||'-')+'</td>'
       + '<td class="mono qty">'+qtyDisp+'</td>'
       + '<td class="mono">'+sharedEsc(p.dueDate||'-')+'</td>'
@@ -1845,7 +1857,7 @@ function buildSharedProgressHtml(){
       if(da!==db) return db.localeCompare(da);
       return (a.itemName||'').localeCompare(b.itemName||'');
     });
-    const head = '<tr class="grp" data-sup="'+sharedEsc(sup)+'"><td colspan="7">'+sharedEsc(sup)+' <span class="grp-n">'+items.length+'건</span></td></tr>';
+    const head = '<tr class="grp" data-sup="'+sharedEsc(sup)+'"><td colspan="8">'+sharedEsc(sup)+' <span class="grp-n">'+items.length+'건</span></td></tr>';
     return head + items.map(domItemRow).join('');
   }).join('');
   const chip = function(label,key,color,cnts){ return '<span class="sum-chip"><i style="background:'+color+'"></i>'+label+' <b>'+((cnts||counts)[key]||0)+'</b></span>'; };
@@ -1880,9 +1892,11 @@ function buildSharedProgressHtml(){
     + '.grp td{background:#dfe7ea;color:#16233d;font-weight:800;font-size:12.5px;padding:9px 12px;border-top:2px solid #16233d;}'
     + '.grp-n{font-weight:700;font-size:11px;color:#4c5a62;margin-left:8px;}'
     + '.mono{font-family:"JetBrains Mono","SF Mono",Consolas,monospace;}'
-    + '.qty{text-align:right;}'
+    + '.qty{text-align:center;}'
     + '.qty-old{color:#b7b2a3;text-decoration:line-through;font-size:11px;}'
     + '.qty-new{color:#dc2626;font-weight:800;}'
+    + '.stock{text-align:center;color:#4c5a62;}'
+    + '.stock-none{color:#dc2626;font-weight:700;font-size:11.5px;}'
     + '.nm{font-weight:700;white-space:normal;min-width:170px;}'
     + '.dash{color:#b7b2a3;}'
     + '.plan{color:#8a97a0;font-size:12px;}'
@@ -1926,7 +1940,7 @@ function buildSharedProgressHtml(){
     + '<div class="sec-title">해외 발주 · 생산 → 선적 → 통관 → 공장입고</div>'
     + '<div class="bar"><div class="sum">'+summary+'</div></div>'
     + (rowsSrc.length ? '<div class="tbl-wrap"><table><thead><tr>'
-        + '<th>품명</th><th>품목코드</th><th>공급사</th><th>수량</th><th>납기요청일</th><th>진행상태</th>'
+        + '<th>품명</th><th>품목코드</th><th style="text-align:center;">재고</th><th>공급사</th><th style="text-align:center;">수량</th><th>납기요청일</th><th>진행상태</th>'
         + '<th>생산완료</th><th>선적</th><th>항구도착</th><th>공장입고</th>'
         + '</tr></thead><tbody id="tb">'+rowsHtml+'</tbody></table></div>'
       : '<div class="empty">해외 발주 건이 없습니다.</div><tbody id="tb"></tbody>')
@@ -1934,7 +1948,7 @@ function buildSharedProgressHtml(){
     + '<div class="sec-title">국내 발주 · 발주 → 입고 → 검수</div>'
     + '<div class="bar"><div class="sum">'+domSummary+'</div></div>'
     + (domRowsSrc.length ? '<div class="tbl-wrap"><table><thead><tr>'
-        + '<th>품명</th><th>품목코드</th><th>공급사</th><th>수량</th><th>납기요청일</th><th>진행상태</th>'
+        + '<th>품명</th><th>품목코드</th><th style="text-align:center;">재고</th><th>공급사</th><th style="text-align:center;">수량</th><th>납기요청일</th><th>진행상태</th>'
         + '<th>입고일</th>'
         + '</tr></thead><tbody id="tbDom">'+domRowsHtml+'</tbody></table></div>'
       : '<div class="empty">국내 발주 건이 없습니다.</div><tbody id="tbDom"></tbody>')
