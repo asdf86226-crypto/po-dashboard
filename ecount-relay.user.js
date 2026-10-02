@@ -1,10 +1,12 @@
 // ==UserScript==
 // @name         발주현황 대시보드 — ECOUNT 자동입력 중계
 // @namespace    https://asdf86226-crypto.github.io/po-dashboard/
-// @version      1.0.0
+// @version      1.0.1
 // @description  이카운트 발주서·구매·판매 입력을 사용자 브라우저에서 직접 처리(사용자 공인 IP로 호출됨). 발주현황 대시보드에서만 작동.
 // @author       Flowtech
+// @match        *://asdf86226-crypto.github.io/po-dashboard*
 // @match        https://asdf86226-crypto.github.io/po-dashboard/*
+// @match        https://asdf86226-crypto.github.io/po-dashboard
 // @grant        GM_xmlhttpRequest
 // @grant        GM_setValue
 // @grant        GM_getValue
