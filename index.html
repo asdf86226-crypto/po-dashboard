@@ -1529,10 +1529,13 @@ async function pullPurchaseRequests(){
     reqSetUrl(url);                                   // 성공했을 때만 주소 기억
 
     // ── 재고 동기화 ──
-    // 같은 Apps Script에 ?erp=data 로 호출하면 품목코드별 ERP blob({items:{code:{s:재고}}})이 돌아온다.
-    // (구매요청 Apps Script가 이미 이카운트 메일로 받은 재고를 계산해두고 있음)
-    // 품목코드가 일치하는 기존 발주 전부(해외/국내)에 매번 덮어쓴다.
+    // 같은 Apps Script에 ?erp=data 로 호출하면 품목코드별 ERP blob({items:{code:{s:재고, n:품명, ...}}})이 돌아온다.
+    // 두 종류의 세트를 유지한다:
+    //   stockByCode     : .s 값이 있는 품목 (실제 재고 숫자)
+    //   erpKnownCodes   : blob.items 에 등장한 모든 품목코드 (품목등록은 됐지만 재고가 비어있는 경우 포함)
+    // 이렇게 하면 "ERP에 등록은 되어 있는데 재고가 비어있는 품목"은 0으로, 아예 ERP에 없는 품목만 '미등록'으로 구분 가능.
     const stockByCode = {};
+    const erpKnownCodes = new Set();
     const erpUrl = url + (url.indexOf('?')>=0 ? '&' : '?') + 'erp=data';
     console.log('[재고] ?erp=data 호출 →', erpUrl);
     try{
@@ -1544,10 +1547,11 @@ async function pullPurchaseRequests(){
         const sampleCodes = Object.keys(blob.items).slice(0,5);
         console.log('[재고] ERP blob 품목 수:', Object.keys(blob.items).length, '· 첫 5개 코드:', sampleCodes, '· 샘플:', blob.items[sampleCodes[0]]);
         for(const code in blob.items){
+          erpKnownCodes.add(code);
           const v = blob.items[code] && blob.items[code].s;
           if(v != null && v !== '' && !isNaN(parseFloat(v))) stockByCode[code] = parseFloat(v);
         }
-        console.log('[재고] stockByCode 집계된 품목 수:', Object.keys(stockByCode).length);
+        console.log('[재고] stockByCode 집계된 품목 수:', Object.keys(stockByCode).length, '· ERP 등록 품목 전체:', erpKnownCodes.size);
       }else{
         console.warn('[재고] ERP 응답에 items 필드가 없음 — 구매요청 Apps Script에 ERP 자료가 아직 세팅 안 된 것 같습니다. 구매요청 대시보드에서 "📦 ERP 데이터" 메뉴를 먼저 설정해주세요.');
         toast('ERP 재고 데이터가 비어 있습니다 — 구매요청 대시보드에서 ERP 자료부터 세팅해주세요 (F12 콘솔 참고)', 7000);
@@ -1557,37 +1561,38 @@ async function pullPurchaseRequests(){
         const code = r && r.code;
         if(!code || stockByCode[code] != null) return;
         const st = extractStock(r);
-        if(st != null) stockByCode[code] = st;
+        if(st != null){ stockByCode[code] = st; erpKnownCodes.add(code); }
       });
     }catch(e){
       console.warn('[재고] ?erp=data 호출 실패:', e && e.message);
       toast('ERP 재고 호출 실패: ' + (e && e.message || '알 수 없음') + ' (F12 콘솔 확인)', 7000);
     }
-    // 매칭 진단: 어느 품목코드에 재고가 설정되고 어느 것은 없는지 로그로 확인할 수 있게 한다.
-    if(Object.keys(stockByCode).length){
+    // 매칭 진단: ERP에 등록된 품목·재고가 있는 품목·아예 없는 품목을 구분해서 로그로 보여준다.
+    if(erpKnownCodes.size){
       const posCodes = pos.map(p=>p.itemCode).filter(Boolean);
       const domCodes = domesticPos.map(p=>p.itemCode).filter(Boolean);
-      const matched = [...posCodes, ...domCodes].filter(c => stockByCode[c] != null);
-      const unmatched = [...posCodes, ...domCodes].filter(c => stockByCode[c] == null);
-      console.log('[재고] 매칭:', matched.length, '건 / 미매칭:', unmatched.length, '건');
-      if(unmatched.length) console.log('[재고] 미매칭 품목코드 샘플:', unmatched.slice(0,10));
+      const all = [...posCodes, ...domCodes];
+      const withStock = all.filter(c => stockByCode[c] != null);
+      const inErpNoStock = all.filter(c => stockByCode[c] == null && erpKnownCodes.has(c));
+      const notInErp = all.filter(c => !erpKnownCodes.has(c));
+      console.log('[재고] 재고값 매칭:', withStock.length, '건 / ERP등록만:', inErpNoStock.length, '건 / ERP미등록:', notInErp.length, '건');
+      if(notInErp.length) console.log('[재고] ERP 미등록 품목코드 샘플:', notInErp.slice(0,10));
     }
-    // 한번 pull 을 성공했으면, 매칭이 안 된 건은 "ERP 미등록"으로 표시해 사용자가 0인지 미등록인지 구분할 수 있게 한다.
-    //   - 숫자 : 현재 재고 N개
-    //   - null : "미등록" 라벨 표시 (조회는 했으나 ERP에 재고 데이터 없음)
-    //   - ''/undefined : 아예 아무것도 표시 안 함 (조회조차 안 된 상태)
+    // 상태 기호:
+    //   숫자    : 현재 재고 N
+    //   0       : ERP에 등록돼 있지만 재고값은 없음 → 재고 소진된 것으로 간주
+    //   null    : ERP 품목 마스터에 아예 없음 → "미등록"으로 표시 (한번이라도 조회를 시도한 경우에만)
+    //   '' / undefined : 조회조차 안 된 상태 → 공란
     let stockUpdated = 0;
-    const haveAny = Object.keys(stockByCode).length > 0;
+    const haveAny = erpKnownCodes.size > 0;
     if(haveAny){
       const applyStock = list => list.forEach(p => {
         if(!p.itemCode) return;
-        const st = stockByCode[p.itemCode];
-        if(st != null){
-          if(p.stock !== st){ p.stock = st; stockUpdated++; }
-        }else{
-          // ERP에서 조회해봤지만 이 코드에는 재고가 없음 — "미등록" 표시용 센티넬(null)
-          if(p.stock !== null){ p.stock = null; stockUpdated++; }
-        }
+        let next;
+        if(stockByCode[p.itemCode] != null) next = stockByCode[p.itemCode];
+        else if(erpKnownCodes.has(p.itemCode)) next = 0;  // ERP에 있는데 재고값만 없음
+        else next = null;                                 // ERP에 아예 없음 → 미등록
+        if(p.stock !== next){ p.stock = next; stockUpdated++; }
       });
       applyStock(pos);
       applyStock(domesticPos);
