@@ -4897,13 +4897,20 @@ async function sendErpPoFromPanel(kind){
   if(btn){ btn.disabled = true; btn.textContent = '전송 중...'; }
   try{
     const res = await chk.relay.savePurchaseOrder(company, payload);
-    const detail = res && res.Data && res.Data.ResultDetails && res.Data.ResultDetails[0];
-    const slip = detail && Array.isArray(detail.SlipNos) ? detail.SlipNos[0] : null;
-    const ok = !!(detail && detail.IsSuccess && slip);
-    if(!ok){
-      const msg = (detail && (detail.TotalError || detail.Errors)) || (res && res.Error && res.Error.Message) || JSON.stringify(res).slice(0, 300);
-      throw new Error('전송 실패: ' + msg);
+    console.log('[ECOUNT 발주서 응답]', res);
+    const data = res && res.Data || {};
+    const detail = Array.isArray(data.ResultDetails) ? data.ResultDetails[0] : null;
+    // 성공 판정: IsSuccess=true OR SuccessCnt>0 OR Status 가 "200" — 어느 하나라도 참이면 성공
+    const isSuccess = !!(detail && detail.IsSuccess) || data.SuccessCnt > 0 || detail && detail.Status === '200' || detail && detail.Status === 200;
+    if(!isSuccess){
+      // 진짜 실패: 실제 에러 메시지만 추려 보여준다 ([전표묶음] OK 같은 성공 메시지는 제외)
+      const errText = (detail && detail.TotalError && !/OK/.test(detail.TotalError)) ? detail.TotalError
+                    : (detail && detail.Errors && JSON.stringify(detail.Errors))
+                    || (res && res.Error && res.Error.Message)
+                    || JSON.stringify(res).slice(0, 300);
+      throw new Error('전송 실패: ' + errText);
     }
+    const slip = detail && Array.isArray(detail.SlipNos) && detail.SlipNos.length ? String(detail.SlipNos[0]) : '(전표번호 미반환)';
     p.ecountPoSlip = slip;
     p.ecountPoAt = new Date().toISOString().slice(0, 16).replace('T', ' ');
     p.ecountPoCompany = company;
