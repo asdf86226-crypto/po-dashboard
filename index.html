@@ -4804,13 +4804,31 @@ function refreshErpRow(kind, id){
   const p = list.find(x => x.id === id);
   if(!p){ row.style.display = 'none'; return; }
   if(p.ecountPoSlip){
-    statusEl.innerHTML = '✅ 전송 완료 · 전표번호 <b>' + p.ecountPoSlip + '</b>' + (p.ecountPoAt ? ' · ' + p.ecountPoAt : '');
+    statusEl.innerHTML = '✅ 전송 완료 · 전표번호 <b>' + p.ecountPoSlip + '</b>' + (p.ecountPoAt ? ' · ' + p.ecountPoAt : '')
+      + ' <a href="#" data-clear-erp="' + kind + '" style="margin-left:8px; font-size:11px; color:#dc2626; text-decoration:underline;">전송기록 삭제</a>';
     btn.textContent = '🔁 다시 전송 (덮어쓰기 아님 — 새 전표 생성)';
     btn.classList.remove('brass'); btn.classList.add('ghost');
   }else{
     statusEl.innerHTML = '아직 전송하지 않았습니다.';
     btn.textContent = '📤 ERP 발주서 전송';
   }
+}
+
+// 전송기록만 지우기 — ERP 쪽 전표는 안 건드리고 대시보드 쪽 뱃지/번호만 초기화
+async function clearErpRecord(kind){
+  const id = (kind === 'dom') ? editingDomId : editingPoId;
+  if(!id) return;
+  const list = kind === 'dom' ? domesticPos : pos;
+  const p = list.find(x => x.id === id);
+  if(!p || !p.ecountPoSlip) return;
+  if(!confirm('이 발주의 ERP 전송기록(전표#' + p.ecountPoSlip + ')을 대시보드에서 지울까요?\n\n참고: ERP(이카운트)의 전표는 삭제되지 않습니다. 이카운트에서 이미 삭제했을 때 대시보드만 맞춰주려는 용도예요.')) return;
+  delete p.ecountPoSlip;
+  delete p.ecountPoAt;
+  delete p.ecountPoCompany;
+  if(kind === 'dom') await saveDomesticPos(); else await savePos();
+  refreshErpRow(kind, id);
+  render();
+  toast('ERP 전송기록을 삭제했습니다');
 }
 
 function supplierEcountCode(name){
@@ -4928,6 +4946,13 @@ async function sendErpPoFromPanel(kind){
 
 document.getElementById('poErpSendBtn').addEventListener('click', () => sendErpPoFromPanel('po'));
 document.getElementById('domErpSendBtn').addEventListener('click', () => sendErpPoFromPanel('dom'));
+// 전송기록 삭제 링크 — 상태 라인 안의 <a data-clear-erp="po|dom"> 를 이벤트 위임으로 처리
+document.addEventListener('click', (e) => {
+  const a = e.target.closest && e.target.closest('a[data-clear-erp]');
+  if(!a) return;
+  e.preventDefault();
+  clearErpRecord(a.getAttribute('data-clear-erp'));
+});
 
 /* ---------------- Tabs ---------------- */
 function switchToView(name){
