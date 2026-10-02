@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         발주현황 대시보드 — ECOUNT 자동입력 중계
 // @namespace    https://asdf86226-crypto.github.io/po-dashboard/
-// @version      1.0.2
+// @version      1.0.3
 // @description  이카운트 발주서·구매·판매 입력을 사용자 브라우저에서 직접 처리(사용자 공인 IP로 호출됨). 발주현황 대시보드에서만 작동.
 // @author       Flowtech
 // @match        *://asdf86226-crypto.github.io/po-dashboard*
@@ -135,8 +135,9 @@
 
   // ─── 비즈니스 API 래퍼 ──────────────────────────────────────
   // 발주서입력 — bulkDatas: {UPLOAD_SER_NO, IO_DATE, CUST, WH_CD, PROD_CD, QTY, PRICE, REMARKS, ...}
+  // 경로: /OAPI/V2/Purchases/SavePurchaseOrder (ECOUNT API 공식 명세)
   async function savePurchaseOrder(company, bulkDatas) {
-    return apiCall(company, '/OAPI/V2/PurchaseOrder/SavePurchaseOrder', {
+    return apiCall(company, '/OAPI/V2/Purchases/SavePurchaseOrder', {
       PurchaseOrderList: [{ BulkDatas: bulkDatas }],
     });
   }
