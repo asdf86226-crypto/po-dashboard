@@ -1037,6 +1037,11 @@
           <b id="computedAmounts">$0.00 / $0.00</b>
         </div>
 
+        <div class="erp-row" id="poErpRow" style="display:none; margin-top:10px; padding:12px; border:1px solid var(--line); border-radius:8px; background:#f7f9f8;">
+          <div style="font-size:12px; font-weight:700; color:var(--ink-soft); margin-bottom:6px;">ERP 자동입력 (플로우텍 이카운트)</div>
+          <div id="poErpStatus" style="font-size:12px; color:var(--ink-soft); margin-bottom:8px;">—</div>
+          <button type="button" class="btn ghost" id="poErpSendBtn" style="width:100%;">📤 ERP 발주서 전송</button>
+        </div>
         <div class="panel-actions">
           <button type="button" class="btn ghost" id="poCancelBtn">취소</button>
           <button type="button" class="btn ghost" id="poDuplicateBtn" style="display:none;">⧉ 이 건 복제하기 (분할 입고용)</button>
@@ -1159,6 +1164,11 @@
           <b id="domComputedAmounts">₩0 / ₩0</b>
         </div>
 
+        <div class="erp-row" id="domErpRow" style="display:none; margin-top:10px; padding:12px; border:1px solid var(--line); border-radius:8px; background:#f7f9f8;">
+          <div style="font-size:12px; font-weight:700; color:var(--ink-soft); margin-bottom:6px;">ERP 자동입력 (태성정밀 이카운트)</div>
+          <div id="domErpStatus" style="font-size:12px; color:var(--ink-soft); margin-bottom:8px;">—</div>
+          <button type="button" class="btn ghost" id="domErpSendBtn" style="width:100%;">📤 ERP 발주서 전송</button>
+        </div>
         <div class="panel-actions">
           <button type="button" class="btn ghost" id="domCancelBtn">취소</button>
           <button type="button" class="btn ghost" id="domDuplicateBtn" style="display:none;">⧉ 이 건 복제하기 (분할 입고용)</button>
@@ -1198,6 +1208,7 @@
         <div class="fgroup"><label>주요품목</label><input type="text" name="items"></div>
         <div class="fgroup"><label>결제조건(대금지급)</label><input type="text" name="payTerms" placeholder="예: 30%선금(PI)/입고 후 70% 잔금(CI)"></div>
         <div class="fgroup"><label>특이사항 / 업체평가</label><textarea name="note" rows="2"></textarea></div>
+        <div class="fgroup"><label>ECOUNT 거래처코드 <span style="font-weight:400; color:var(--ink-soft); text-transform:none; font-size:11px;">(ERP 자동입력에 사용 — 이카운트 거래처등록 코드)</span></label><input type="text" name="ecountCode" placeholder="예: BKCHCNBJ44P"></div>
         <div class="panel-actions">
           <button type="button" class="btn ghost" id="suppCancelBtn">취소</button>
           <button type="submit" class="btn brass">저장</button>
@@ -2603,7 +2614,7 @@ function renderPoTable(){
     return `<tr data-id="${p.id}" class="${piGroupSize>1?'pi-grouped-row':''}">
       <td>${p.reqDate||'-'}</td>
       <td>${p.requester||'-'}</td>
-      <td>${dupArrow}${p.itemName||'-'}${p.isFirstBatch?'<span class="item-badge">초도</span>':''}${p.isSample?'<span class="item-badge sample">샘플</span>':''}${p.isUrgent?'<span class="item-badge urgent">긴급</span>':''}${piTag}${apprBadge(p)}</td>
+      <td>${dupArrow}${p.itemName||'-'}${p.isFirstBatch?'<span class="item-badge">초도</span>':''}${p.isSample?'<span class="item-badge sample">샘플</span>':''}${p.isUrgent?'<span class="item-badge urgent">긴급</span>':''}${piTag}${apprBadge(p)}${erpBadge(p)}</td>
       <td style="font-family:var(--sans)">${p.itemCode||'-'}${stockSubCell(p)}</td>
       <td style="font-family:var(--sans)">${p.ciQty && parseFloat(p.ciQty)!==parseFloat(p.qty) ? `<span style="color:#dc2626; text-decoration:line-through;">${fmtQty(p.qty)}</span> → <b style="color:#dc2626; font-size:14px;">${fmtQty(p.ciQty)}</b>` : fmtQty(p.qty)}</td>
       <td>${p.supplier||'-'}</td>
@@ -3214,6 +3225,7 @@ function openPoPanel(id){
   updateBalanceInputsLock();     // 저장된 depositPct가 100이면 잔금 입력칸을 잠근다
   updateFieldsetFillState();
   syncShareDisplays();
+  refreshErpRow('po', id);       // ERP 자동입력 섹션 상태 갱신
   if(id) highlightRows([id]); else clearRowHighlights();
   poOverlay.classList.add('active');
 }
@@ -4042,7 +4054,7 @@ function renderDomTable(){
     return `<tr data-id="${p.id}">
       <td>${p.reqDate||'-'}</td>
       <td>${p.requester||'-'}</td>
-      <td>${p.itemName||'-'}${apprBadge(p)}</td>
+      <td>${p.itemName||'-'}${apprBadge(p)}${erpBadge(p)}</td>
       <td style="font-family:var(--sans)">${p.itemCode||'-'}${stockSubCell(p)}</td>
       <td style="font-family:var(--sans)">${p.actualQty && parseFloat(p.actualQty)!==parseFloat(p.qty) ? `<span style="color:#dc2626; text-decoration:line-through;">${fmtQty(p.qty)}</span> → <b style="color:#dc2626; font-size:14px;">${fmtQty(p.actualQty)}</b>` : fmtQty(p.qty)}</td>
       <td>${p.supplier||'-'}</td>
@@ -4144,6 +4156,7 @@ function openDomPanel(id){
   updateDomComputedPreview();
   updateDomBalanceInputsLock();
   syncDomShareDisplays();
+  refreshErpRow('dom', id);
   if(id) highlightRows([id]); else clearRowHighlights();
   domOverlay.classList.add('active');
 }
@@ -4327,6 +4340,11 @@ function apprBadge(p){
     return '<span class="appr-dot" title="결재완료"></span>';
   }
   return '';
+}
+// ERP 발주서 전송 완료 뱃지 — 전표번호가 저장된 건만 표시
+function erpBadge(p){
+  if(!p || !p.ecountPoSlip) return '';
+  return '<span class="item-badge" style="background:#0d9488;" title="ECOUNT 발주서 전송완료 · 전표#'+p.ecountPoSlip+(p.ecountPoAt?' · '+p.ecountPoAt:'')+'">ERP ✓</span>';
 }
 
 function getApprPendingPool(excludeBatchId){
@@ -4753,6 +4771,156 @@ document.getElementById('suppDeleteLink').addEventListener('click', async ()=>{
   render();
   toast('삭제되었습니다');
 });
+
+/* ---------------- ECOUNT ERP 자동입력 (Tampermonkey 중계) ----------------
+ * 설치된 Tampermonkey 유저스크립트(ecount-relay.user.js) 가 window.ecountRelay 를 노출.
+ * 상세 패널에서 "📤 ERP 발주서 전송" 눌러 호출.
+ * 전표번호(ecountPoSlip) 는 발주 레코드에 저장되어 목록에 뱃지로 표시된다. */
+const ECOUNT_WH_CD = '500';
+
+function ecountRelayStatus(){
+  const r = (typeof window !== 'undefined' && window.ecountRelay) || null;
+  if(!r) return {ok:false, msg:'Tampermonkey + ECOUNT 자동입력 스크립트가 설치되지 않았습니다. (ecount-relay.user.js)'};
+  if(!r.hasCreds || !r.hasCreds()) return {ok:false, msg:'ECOUNT 자격이 설정되지 않았습니다. 우측 상단 Tampermonkey 아이콘 → "ECOUNT 자격 설정"'};
+  return {ok:true, relay:r};
+}
+
+function todayYmd(){
+  const d = new Date();
+  return String(d.getFullYear()) + String(d.getMonth()+1).padStart(2,'0') + String(d.getDate()).padStart(2,'0');
+}
+
+// 상세 패널 안의 "ERP 자동입력" 섹션 상태 갱신 (open 시 호출)
+function refreshErpRow(kind, id){
+  const prefix = kind === 'dom' ? 'dom' : 'po';
+  const row = document.getElementById(prefix + 'ErpRow');
+  const statusEl = document.getElementById(prefix + 'ErpStatus');
+  const btn = document.getElementById(prefix + 'ErpSendBtn');
+  if(!row) return;
+  // 신규 등록 중이면 숨긴다 (저장 후 열어야 전송 가능)
+  if(!id){ row.style.display = 'none'; return; }
+  row.style.display = '';
+  const list = kind === 'dom' ? domesticPos : pos;
+  const p = list.find(x => x.id === id);
+  if(!p){ row.style.display = 'none'; return; }
+  if(p.ecountPoSlip){
+    statusEl.innerHTML = '✅ 전송 완료 · 전표번호 <b>' + p.ecountPoSlip + '</b>' + (p.ecountPoAt ? ' · ' + p.ecountPoAt : '');
+    btn.textContent = '🔁 다시 전송 (덮어쓰기 아님 — 새 전표 생성)';
+    btn.classList.remove('brass'); btn.classList.add('ghost');
+  }else{
+    statusEl.innerHTML = '아직 전송하지 않았습니다.';
+    btn.textContent = '📤 ERP 발주서 전송';
+  }
+}
+
+function supplierEcountCode(name){
+  const s = suppliers.find(x => (x.name||'') === (name||''));
+  return s && s.ecountCode ? String(s.ecountCode).trim() : '';
+}
+
+// 해외 (수입품) → 플로우텍 ECOUNT 발주서 payload
+function buildOverseasOrderPayload(p){
+  const cust = supplierEcountCode(p.supplier);
+  if(!cust) throw new Error('공급사 "' + (p.supplier||'(미지정)') + '" 의 ECOUNT 거래처코드가 없습니다. "거래처" 탭에서 등록해주세요.');
+  if(!p.itemCode) throw new Error('품목코드가 비어있어 전송할 수 없습니다.');
+  if(!p.qty) throw new Error('수량이 비어있어 전송할 수 없습니다.');
+  // 단가: PI금액이 있으면 원화환산 (PI × 환율 / 수량), 없으면 생략(0)
+  const piAmt = parseFloat(p.piAmount) || 0;
+  const qty = parseFloat(p.qty) || 0;
+  let pricePerUnit = 0;
+  if(piAmt > 0 && qty > 0){
+    const rate = (p.currency === 'CNY') ? (fxRates.cny || 0) : (fxRates.krw || 0);
+    pricePerUnit = Math.round(piAmt * rate / qty);
+  }
+  return {
+    UPLOAD_SER_NO: '1',
+    IO_DATE: todayYmd(),
+    CUST: cust,
+    WH_CD: ECOUNT_WH_CD,
+    PROD_CD: String(p.itemCode).trim(),
+    QTY: String(qty),
+    PRICE: String(pricePerUnit),
+    REMARKS: '[발주현황 자동입력] ' + (p.piNo ? 'PI#' + p.piNo + ' · ' : '') + (p.itemName || '').slice(0, 60),
+  };
+}
+
+// 국내 → 태성정밀 ECOUNT 발주서 payload
+function buildDomesticOrderPayload(p){
+  const cust = supplierEcountCode(p.supplier);
+  if(!cust) throw new Error('공급사 "' + (p.supplier||'(미지정)') + '" 의 ECOUNT 거래처코드가 없습니다. "거래처" 탭에서 등록해주세요.');
+  if(!p.itemCode) throw new Error('품목코드가 비어있어 전송할 수 없습니다.');
+  if(!p.qty) throw new Error('수량이 비어있어 전송할 수 없습니다.');
+  const qty = parseFloat(p.qty) || 0;
+  const unitPrice = parseFloat(p.unitPrice) || 0;
+  const poAmount = parseFloat(p.poAmount) || 0;
+  const price = unitPrice > 0 ? unitPrice : (poAmount > 0 && qty > 0 ? Math.round(poAmount / qty) : 0);
+  return {
+    UPLOAD_SER_NO: '1',
+    IO_DATE: todayYmd(),
+    CUST: cust,
+    WH_CD: ECOUNT_WH_CD,
+    PROD_CD: String(p.itemCode).trim(),
+    QTY: String(qty),
+    PRICE: String(price),
+    REMARKS: '[발주현황 자동입력] ' + (p.itemName || '').slice(0, 60),
+  };
+}
+
+async function sendErpPoFromPanel(kind){
+  const chk = ecountRelayStatus();
+  if(!chk.ok){ toast(chk.msg, 7000); return; }
+  const id = (kind === 'dom') ? editingDomId : editingPoId;
+  if(!id){ toast('저장되지 않은 발주입니다. 먼저 저장 후 전송해주세요.'); return; }
+  const list = kind === 'dom' ? domesticPos : pos;
+  const p = list.find(x => x.id === id);
+  if(!p){ toast('발주 데이터를 찾을 수 없습니다.'); return; }
+
+  let payload;
+  try{
+    payload = (kind === 'dom') ? buildDomesticOrderPayload(p) : buildOverseasOrderPayload(p);
+  }catch(e){ toast(e.message, 7000); return; }
+
+  const company = (kind === 'dom') ? 'taesung' : 'flowtech';
+  const companyLabel = (kind === 'dom') ? '태성정밀' : '플로우텍';
+  const already = !!p.ecountPoSlip;
+  const confirmMsg =
+    (already ? '⚠️ 이미 ERP에 전송된 건입니다 (전표#' + p.ecountPoSlip + ')\n재전송하면 ERP에 새 전표가 하나 더 생성됩니다. 그래도 전송할까요?\n\n' : '아래 내용으로 ' + companyLabel + ' ECOUNT 에 발주서를 전송합니다:\n\n') +
+    '거래처코드: ' + payload.CUST + '\n' +
+    '품목코드: ' + payload.PROD_CD + '\n' +
+    '수량: ' + payload.QTY + '\n' +
+    '단가: ' + Number(payload.PRICE).toLocaleString() + ' 원\n' +
+    '창고: ' + payload.WH_CD + '\n';
+  if(!confirm(confirmMsg)) return;
+
+  const btn = document.getElementById((kind === 'dom' ? 'dom' : 'po') + 'ErpSendBtn');
+  const old = btn ? btn.textContent : '';
+  if(btn){ btn.disabled = true; btn.textContent = '전송 중...'; }
+  try{
+    const res = await chk.relay.savePurchaseOrder(company, payload);
+    const detail = res && res.Data && res.Data.ResultDetails && res.Data.ResultDetails[0];
+    const slip = detail && Array.isArray(detail.SlipNos) ? detail.SlipNos[0] : null;
+    const ok = !!(detail && detail.IsSuccess && slip);
+    if(!ok){
+      const msg = (detail && (detail.TotalError || detail.Errors)) || (res && res.Error && res.Error.Message) || JSON.stringify(res).slice(0, 300);
+      throw new Error('전송 실패: ' + msg);
+    }
+    p.ecountPoSlip = slip;
+    p.ecountPoAt = new Date().toISOString().slice(0, 16).replace('T', ' ');
+    p.ecountPoCompany = company;
+    if(kind === 'dom') await saveDomesticPos(); else await savePos();
+    refreshErpRow(kind, id);
+    render();
+    toast('✅ ERP 발주서 전송 완료 · 전표번호 ' + slip, 5000);
+  }catch(err){
+    console.error('[ECOUNT 발주서 전송 실패]', err);
+    toast('❌ ' + (err && err.message || '전송 실패 — 콘솔 참고'), 9000);
+  }finally{
+    if(btn){ btn.disabled = false; btn.textContent = old; }
+  }
+}
+
+document.getElementById('poErpSendBtn').addEventListener('click', () => sendErpPoFromPanel('po'));
+document.getElementById('domErpSendBtn').addEventListener('click', () => sendErpPoFromPanel('dom'));
 
 /* ---------------- Tabs ---------------- */
 function switchToView(name){
