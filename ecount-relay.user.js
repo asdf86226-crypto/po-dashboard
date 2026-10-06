@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         발주현황 대시보드 — ECOUNT 자동입력 중계
 // @namespace    https://asdf86226-crypto.github.io/po-dashboard/
-// @version      1.0.3
+// @version      1.0.4
 // @description  이카운트 발주서·구매·판매 입력을 사용자 브라우저에서 직접 처리(사용자 공인 IP로 호출됨). 발주현황 대시보드에서만 작동.
 // @author       Flowtech
 // @match        *://asdf86226-crypto.github.io/po-dashboard*
@@ -57,12 +57,16 @@
       const isTest = confirm('이번에 저장할 API 키는 "테스트키" 인가요?\n\n확인 = 테스트키 (sboapi 서버)\n취소 = 실제 운영키 (oapi 서버)');
       const t = cur.taesung || {};
       const f = cur.flowtech || {};
+      // 담당자(사원) 코드 — ECOUNT 기초등록 > 사원등록에서 확인. 비워두면 ERP에 담당자 없이 등록됨.
+      const empT = ask('태성정밀 담당자 사원코드 EMP_CD (비워도 됨)', t.empCd || '');
+      const empF = ask('플로우텍 담당자 사원코드 EMP_CD (비워도 됨)', f.empCd || '');
       const next = {
         taesung: {
           comCode: ask('태성정밀 COM_CODE', t.comCode || '76811'),
           userId:  ask('태성정밀 USER_ID',   t.userId  || 'JMOH'),
           apiKey:  ask('태성정밀 API_CERT_KEY', t.apiKey || ''),
           zone:    ask('태성정밀 ZONE (예: CC)',  t.zone   || 'CC'),
+          empCd:   empT,
           isTest,
         },
         flowtech: {
@@ -70,11 +74,12 @@
           userId:  ask('플로우텍 USER_ID',   f.userId  || 'JMOH'),
           apiKey:  ask('플로우텍 API_CERT_KEY', f.apiKey || ''),
           zone:    ask('플로우텍 ZONE (예: CA)',  f.zone   || 'CA'),
+          empCd:   empF,
           isTest,
         },
       };
       setCreds(next);
-      alert('✅ ECOUNT 자격 저장 완료\n\n• 태성 ' + next.taesung.comCode + ' / ZONE ' + next.taesung.zone + '\n• 플로우텍 ' + next.flowtech.comCode + ' / ZONE ' + next.flowtech.zone + '\n• 서버: ' + (isTest ? 'sboapi(테스트)' : 'oapi(운영)'));
+      alert('✅ ECOUNT 자격 저장 완료\n\n• 태성 ' + next.taesung.comCode + ' / ZONE ' + next.taesung.zone + ' / 담당자 ' + (next.taesung.empCd || '(없음)') + '\n• 플로우텍 ' + next.flowtech.comCode + ' / ZONE ' + next.flowtech.zone + ' / 담당자 ' + (next.flowtech.empCd || '(없음)') + '\n• 서버: ' + (isTest ? 'sboapi(테스트)' : 'oapi(운영)'));
     } catch (e) {
       if (e.message !== 'cancelled') alert('저장 실패: ' + e.message);
     }
@@ -160,11 +165,12 @@
 
   // ─── 대시보드 페이지에 노출 ─────────────────────────────────
   const relay = {
-    __version: '1.0.0',
+    __version: '1.0.1',
     __installed: true,
     __isTest: function () { const c = getCreds(); return !!(c && c.taesung && c.taesung.isTest); },
     setupCreds: setupCreds,
     hasCreds: function () { const c = getCreds(); return !!(c && c.taesung && c.taesung.apiKey && c.flowtech && c.flowtech.apiKey); },
+    getEmpCd: function (company) { const c = getCreds(); return (c && c[company] && c[company].empCd) || ''; },
     login: login,
     savePurchaseOrder: savePurchaseOrder,
     savePurchase: savePurchase,

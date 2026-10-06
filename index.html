@@ -4836,6 +4836,29 @@ function supplierEcountCode(name){
   return s && s.ecountCode ? String(s.ecountCode).trim() : '';
 }
 
+// 공통 — 수량·단가로 공급가액·부가세·담당자코드 등 공통 필드를 채운 payload 뼈대 생성.
+// 거래유형 "부가세율 적용" 기준 — 단가는 공급가액 기준(부가세 별도)으로 간주, 부가세는 10% 자동.
+function makeOrderBase(company, cust, itemCode, qty, pricePerUnit, remarks){
+  const supplyAmt = Math.round(qty * pricePerUnit);
+  const vatAmt = Math.round(supplyAmt * 0.1);
+  const relay = (typeof window !== 'undefined' && window.ecountRelay) || null;
+  const empCd = (relay && typeof relay.getEmpCd === 'function') ? (relay.getEmpCd(company) || '') : '';
+  return {
+    UPLOAD_SER_NO: '1',
+    IO_DATE: todayYmd(),
+    CUST: cust,
+    EMP_CD: empCd,                 // 담당자 — Tampermonkey 자격에 저장된 사원코드
+    WH_CD: ECOUNT_WH_CD,
+    PROD_CD: String(itemCode).trim(),
+    QTY: String(qty),
+    PRICE: String(pricePerUnit),
+    USER_PRICE_VAT: '0',           // 단가는 부가세 별도(공급가액 기준)
+    SUPPLY_AMT: String(supplyAmt),
+    VAT_AMT: String(vatAmt),
+    REMARKS: remarks,
+  };
+}
+
 // 해외 (수입품) → 플로우텍 ECOUNT 발주서 payload
 function buildOverseasOrderPayload(p){
   const cust = supplierEcountCode(p.supplier);
@@ -4850,16 +4873,10 @@ function buildOverseasOrderPayload(p){
     const rate = (p.currency === 'CNY') ? (fxRates.cny || 0) : (fxRates.krw || 0);
     pricePerUnit = Math.round(piAmt * rate / qty);
   }
-  return {
-    UPLOAD_SER_NO: '1',
-    IO_DATE: todayYmd(),
-    CUST: cust,
-    WH_CD: ECOUNT_WH_CD,
-    PROD_CD: String(p.itemCode).trim(),
-    QTY: String(qty),
-    PRICE: String(pricePerUnit),
-    REMARKS: '[발주현황 자동입력] ' + (p.piNo ? 'PI#' + p.piNo + ' · ' : '') + (p.itemName || '').slice(0, 60),
-  };
+  return makeOrderBase(
+    'flowtech', cust, p.itemCode, qty, pricePerUnit,
+    '[발주현황 자동입력] ' + (p.piNo ? 'PI#' + p.piNo + ' · ' : '') + (p.itemName || '').slice(0, 60)
+  );
 }
 
 // 국내 → 태성정밀 ECOUNT 발주서 payload
@@ -4872,16 +4889,10 @@ function buildDomesticOrderPayload(p){
   const unitPrice = parseFloat(p.unitPrice) || 0;
   const poAmount = parseFloat(p.poAmount) || 0;
   const price = unitPrice > 0 ? unitPrice : (poAmount > 0 && qty > 0 ? Math.round(poAmount / qty) : 0);
-  return {
-    UPLOAD_SER_NO: '1',
-    IO_DATE: todayYmd(),
-    CUST: cust,
-    WH_CD: ECOUNT_WH_CD,
-    PROD_CD: String(p.itemCode).trim(),
-    QTY: String(qty),
-    PRICE: String(price),
-    REMARKS: '[발주현황 자동입력] ' + (p.itemName || '').slice(0, 60),
-  };
+  return makeOrderBase(
+    'taesung', cust, p.itemCode, qty, price,
+    '[발주현황 자동입력] ' + (p.itemName || '').slice(0, 60)
+  );
 }
 
 async function sendErpPoFromPanel(kind){
@@ -4904,9 +4915,12 @@ async function sendErpPoFromPanel(kind){
   const confirmMsg =
     (already ? '⚠️ 이미 ERP에 전송된 건입니다 (전표#' + p.ecountPoSlip + ')\n재전송하면 ERP에 새 전표가 하나 더 생성됩니다. 그래도 전송할까요?\n\n' : '아래 내용으로 ' + companyLabel + ' ECOUNT 에 발주서를 전송합니다:\n\n') +
     '거래처코드: ' + payload.CUST + '\n' +
+    '담당자: ' + (payload.EMP_CD || '(없음)') + '\n' +
     '품목코드: ' + payload.PROD_CD + '\n' +
     '수량: ' + payload.QTY + '\n' +
     '단가: ' + Number(payload.PRICE).toLocaleString() + ' 원\n' +
+    '공급가액: ' + Number(payload.SUPPLY_AMT).toLocaleString() + ' 원\n' +
+    '부가세: ' + Number(payload.VAT_AMT).toLocaleString() + ' 원 (10%)\n' +
     '창고: ' + payload.WH_CD + '\n';
   if(!confirm(confirmMsg)) return;
 
