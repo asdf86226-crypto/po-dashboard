@@ -5300,6 +5300,12 @@ function buildImportPayloads(p){
     PRICE: String(pr.unitF), SUPPLY_AMT_F: String(pr.amtF), SUPPLY_AMT: String(pr.amtKrw), VAT_AMT: '0',
   });
   const ioF = ecountIoType('flowtech'); if(ioF) fPurchase.IO_TYPE = ioF;   // 22 = 부가세율 미적용
+  // 대시보드가 보낸 플로우텍 발주서가 있고 아직 종결 전이면, 구매입력을 그 발주서와 연결 → 이카운트가 발주서를 종결
+  const poSlip = /^(\d{8})-(\d+)$/.exec(p.ecountPoSlip || '');
+  if(poSlip && (p.ecountPoCompany || 'flowtech') === 'flowtech' && !p.ecountPoClosed){
+    fPurchase.ORD_DATE = poSlip[1];
+    fPurchase.ORD_NO = poSlip[2];
+  }
   const fSale = Object.assign({}, base, {
     CUST: ECOUNT_TAESUNG_CUST_IN_FLOWTECH, EMP_CD: empF,
     PRICE: String(pr.saleUnit), SUPPLY_AMT: String(pr.saleSupply), VAT_AMT: String(pr.saleVat),
@@ -5362,7 +5368,8 @@ async function sendImportFromPanel(){
     '전표일자: ' + ioDate + ' (공장입고일)\n' +
     '품목: ' + p.itemCode + ' · 수량 ' + pr.qty.toLocaleString() + '\n' +
     (pr.usedCi ? '' : '⚠️ CI금액이 없어 PI금액으로 계산합니다\n') + '\n' +
-    (p.ecountImport.fPurchase ? '' : '① 플로우텍 구매입력 (' + (p.supplier||'') + ')\n   외화 ' + sym + Number(pr.amtF).toLocaleString(undefined,{maximumFractionDigits:2}) + ' × 환율 ' + pr.rate + ' = ' + won(pr.amtKrw) + ' · 부가세 없음\n') +
+    (p.ecountImport.fPurchase ? '' : '① 플로우텍 구매입력 (' + (p.supplier||'') + ')\n   외화 ' + sym + Number(pr.amtF).toLocaleString(undefined,{maximumFractionDigits:2}) + ' × 환율 ' + pr.rate + ' = ' + won(pr.amtKrw) + ' · 부가세 없음\n'
+      + (steps.fPurchase.data.ORD_NO ? '   발주서 ' + steps.fPurchase.data.ORD_DATE + '-' + steps.fPurchase.data.ORD_NO + ' 와 연결 (발주서 종결)\n' : '')) +
     (p.ecountImport.fSale ? '' : '② 플로우텍 판매입력 (→ 태성정밀)\n') +
     (p.ecountImport.tPurchase ? '' : '③ 태성 구매입력 (← 플로우텍)\n') +
     '   ②③ 판매단가 ' + won(pr.saleUnit) + ' (입고원가 ' + won(pr.costUnit) + ' ÷ 0.7, 100원 올림)\n' +
