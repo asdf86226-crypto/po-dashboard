@@ -4836,14 +4836,30 @@ function supplierEcountCode(name){
   return s && s.ecountCode ? String(s.ecountCode).trim() : '';
 }
 
+// 'YYYY-MM-DD' → 'YYYYMMDD' (TIME_DATE 는 STRING(8))
+function toYmd8(s){
+  if(!s) return '';
+  const t = String(s).replace(/-/g, '').trim();
+  return /^\d{8}$/.test(t) ? t : '';
+}
+
 // 공통 — 수량·단가로 발주서 payload 뼈대 생성.
-// opts.vat         : true=10% 부가세 계산 / false=부가세 0
-// opts.exchangeType: 'USD'/'CNY' 등 — 설정하면 외화 거래로 들어감(ECOUNT가 환율 적용)
-// opts.exchangeRate: 환율(원/외화 1단위)
-// opts.currencyLabel: '내화' 또는 'USD'/'CNY' 등 — 사용자 미리보기용
+// opts.vat          : true=10% 부가세 계산 / false=부가세 0
+// opts.exchangeType : 'USD'/'CNY' 등 — 설정하면 외화 거래로 들어감
+// opts.exchangeRate : 환율(원/외화 1단위)
+// opts.ioType       : 거래유형코드 (STRING(2)) — Self-Customizing>환경설정>기능설정>공통탭>재고-부가세 설정에서 확인
+// opts.dueDate      : YYYYMMDD 납기일자
+// opts.currencyLabel: 미리보기용 통화 라벨
 function makeOrderBase(company, cust, itemCode, qty, pricePerUnit, remarks, opts){
   opts = opts || {};
-  const supplyAmt = Math.round(qty * pricePerUnit * 100) / 100;  // 소수점 유지(외화는 센트 단위)
+  const rate = opts.exchangeRate || 0;
+  // 외화 거래: SUPPLY_AMT_F = 외화공급가액, SUPPLY_AMT = 원화공급가액(외화 × 환율)
+  //    (ECOUNT는 수량·단가·환율을 입력해도 공급가액을 자동계산 하지 않음 — 반드시 명시해야 함)
+  // 원화 거래: SUPPLY_AMT = QTY × PRICE, SUPPLY_AMT_F 미사용
+  const supplyAmtF = opts.exchangeType ? Math.round(qty * pricePerUnit * 100) / 100 : 0;
+  const supplyAmt = opts.exchangeType
+    ? Math.round(supplyAmtF * rate)                           // 외화 × 환율 → 원화
+    : Math.round(qty * pricePerUnit);                         // 원화 그대로
   const vatAmt = opts.vat ? Math.round(supplyAmt * 0.1) : 0;
   const relay = (typeof window !== 'undefined' && window.ecountRelay) || null;
   const empCd = (relay && typeof relay.getEmpCd === 'function') ? (relay.getEmpCd(company) || '') : '';
@@ -4856,22 +4872,31 @@ function makeOrderBase(company, cust, itemCode, qty, pricePerUnit, remarks, opts
     PROD_CD: String(itemCode).trim(),
     QTY: String(qty),
     PRICE: String(pricePerUnit),
-    USER_PRICE_VAT: '0',
     SUPPLY_AMT: String(supplyAmt),
     VAT_AMT: String(vatAmt),
     REMARKS: remarks,
   };
+  if(opts.dueDate) base.TIME_DATE = opts.dueDate;             // 납기일자
+  if(opts.ioType)  base.IO_TYPE   = String(opts.ioType);      // 거래유형 코드
   if(opts.exchangeType){
     base.EXCHANGE_TYPE = opts.exchangeType;
-    if(opts.exchangeRate) base.EXCHANGE_RATE = String(opts.exchangeRate);
+    if(rate) base.EXCHANGE_RATE = String(rate);
+    base.SUPPLY_AMT_F = String(supplyAmtF);                   // 외화 공급가액
   }
   // 미리보기용 부가 정보 (ECOUNT 전송 시 자동 제거)
   base.__previewCurrency = opts.currencyLabel || 'KRW';
+  base.__previewSupplyKrw = opts.exchangeType ? supplyAmt : null;
   return base;
 }
 
+// 거래유형(IO_TYPE) 코드를 Tampermonkey 자격에서 꺼낸다 — 회사별로 저장돼 있을 수 있음
+function ecountIoType(company){
+  const r = (typeof window !== 'undefined' && window.ecountRelay) || null;
+  return (r && typeof r.getIoType === 'function') ? (r.getIoType(company) || '') : '';
+}
+
 // 해외 (수입품) → 플로우텍 ECOUNT 발주서 payload
-// 외화 그대로 (USD/CNY) 전송. 부가세 없음.
+// 외화 그대로 (USD/CNY) 전송. 부가세 없음. 거래유형 미설정이면 기본값.
 function buildOverseasOrderPayload(p){
   const cust = supplierEcountCode(p.supplier);
   if(!cust) throw new Error('공급사 "' + (p.supplier||'(미지정)') + '" 의 ECOUNT 거래처코드가 없습니다. "거래처" 탭에서 등록해주세요.');
@@ -4879,14 +4904,20 @@ function buildOverseasOrderPayload(p){
   if(!p.qty) throw new Error('수량이 비어있어 전송할 수 없습니다.');
   const piAmt = parseFloat(p.piAmount) || 0;
   const qty = parseFloat(p.qty) || 0;
-  // 외화 단가 = PI금액 / 수량 (소수점 둘째자리까지 반올림)
   const pricePerUnit = (piAmt > 0 && qty > 0) ? Math.round((piAmt / qty) * 100) / 100 : 0;
   const currency = (p.currency === 'CNY') ? 'CNY' : 'USD';
   const rate = (currency === 'CNY') ? (fxRates.cny || 0) : (fxRates.krw || 0);
   return makeOrderBase(
     'flowtech', cust, p.itemCode, qty, pricePerUnit,
     '[발주현황 자동입력] ' + (p.piNo ? 'PI#' + p.piNo + ' · ' : '') + (p.itemName || '').slice(0, 60),
-    { vat: false, exchangeType: currency, exchangeRate: rate, currencyLabel: currency }
+    {
+      vat: false,
+      exchangeType: currency,
+      exchangeRate: rate,
+      ioType: ecountIoType('flowtech'),
+      dueDate: toYmd8(p.dueDate),
+      currencyLabel: currency,
+    }
   );
 }
 
@@ -4903,7 +4934,12 @@ function buildDomesticOrderPayload(p){
   return makeOrderBase(
     'taesung', cust, p.itemCode, qty, price,
     '[발주현황 자동입력] ' + (p.itemName || '').slice(0, 60),
-    { vat: true, currencyLabel: 'KRW' }
+    {
+      vat: true,
+      ioType: ecountIoType('taesung'),
+      dueDate: toYmd8(p.dueDate),
+      currencyLabel: 'KRW',
+    }
   );
 }
 
@@ -4926,21 +4962,29 @@ async function sendErpPoFromPanel(kind){
   const already = !!p.ecountPoSlip;
   const cur = payload.__previewCurrency || 'KRW';
   const symbol = cur === 'USD' ? '$' : (cur === 'CNY' ? '¥' : '₩');
-  const fmtAmt = v => symbol + Number(v).toLocaleString(undefined, {minimumFractionDigits: cur==='KRW'?0:2, maximumFractionDigits: cur==='KRW'?0:2});
+  const fmtAmt = (v, c) => {
+    const s = (c || cur) === 'USD' ? '$' : ((c||cur) === 'CNY' ? '¥' : '₩');
+    const dec = (c||cur) === 'KRW' ? 0 : 2;
+    return s + Number(v).toLocaleString(undefined, {minimumFractionDigits: dec, maximumFractionDigits: dec});
+  };
   const confirmMsg =
     (already ? '⚠️ 이미 ERP에 전송된 건입니다 (전표#' + p.ecountPoSlip + ')\n재전송하면 ERP에 새 전표가 하나 더 생성됩니다. 그래도 전송할까요?\n\n' : '아래 내용으로 ' + companyLabel + ' ECOUNT 에 발주서를 전송합니다:\n\n') +
     '거래처코드: ' + payload.CUST + '\n' +
     '담당자: ' + (payload.EMP_CD || '(없음)') + '\n' +
+    '거래유형: ' + (payload.IO_TYPE ? '코드 ' + payload.IO_TYPE : '(기본값 — ECOUNT 설정)') + '\n' +
+    '납기일자: ' + (payload.TIME_DATE || '(미지정)') + '\n' +
     '품목코드: ' + payload.PROD_CD + '\n' +
     '수량: ' + payload.QTY + '\n' +
     '단가: ' + fmtAmt(payload.PRICE) + ' (' + cur + ')\n' +
-    '공급가액: ' + fmtAmt(payload.SUPPLY_AMT) + '\n' +
-    (parseFloat(payload.VAT_AMT) > 0 ? '부가세: ' + fmtAmt(payload.VAT_AMT) + ' (10%)\n' : '부가세: 없음\n') +
+    (payload.SUPPLY_AMT_F ? '공급가액(외화): ' + fmtAmt(payload.SUPPLY_AMT_F) + '\n' : '') +
+    '공급가액(원화): ' + fmtAmt(payload.SUPPLY_AMT, 'KRW') + '\n' +
+    (parseFloat(payload.VAT_AMT) > 0 ? '부가세: ' + fmtAmt(payload.VAT_AMT, 'KRW') + ' (10%)\n' : '부가세: 없음\n') +
     (payload.EXCHANGE_TYPE ? '환율: ' + Number(payload.EXCHANGE_RATE||0).toLocaleString() + ' 원/' + payload.EXCHANGE_TYPE + '\n' : '') +
     '창고: ' + payload.WH_CD + '\n';
   if(!confirm(confirmMsg)) return;
   // 미리보기 전용 필드는 ECOUNT 로 보내기 전에 제거
   delete payload.__previewCurrency;
+  delete payload.__previewSupplyKrw;
 
   const btn = document.getElementById((kind === 'dom' ? 'dom' : 'po') + 'ErpSendBtn');
   const old = btn ? btn.textContent : '';

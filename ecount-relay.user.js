@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         발주현황 대시보드 — ECOUNT 자동입력 중계
 // @namespace    https://asdf86226-crypto.github.io/po-dashboard/
-// @version      1.0.4
+// @version      1.0.5
 // @description  이카운트 발주서·구매·판매 입력을 사용자 브라우저에서 직접 처리(사용자 공인 IP로 호출됨). 발주현황 대시보드에서만 작동.
 // @author       Flowtech
 // @match        *://asdf86226-crypto.github.io/po-dashboard*
@@ -60,6 +60,10 @@
       // 담당자(사원) 코드 — ECOUNT 기초등록 > 사원등록에서 확인. 비워두면 ERP에 담당자 없이 등록됨.
       const empT = ask('태성정밀 담당자 사원코드 EMP_CD (비워도 됨)', t.empCd || '');
       const empF = ask('플로우텍 담당자 사원코드 EMP_CD (비워도 됨)', f.empCd || '');
+      // 거래유형 코드(IO_TYPE) — Self-Customizing > 환경설정 > 기능설정 > 공통탭 > 재고-부가세 설정 > 거래유형별 설정.
+      // 수입품 발주서는 보통 "부가세미적용" 또는 "영세율" 코드. 비워두면 ERP 기본값.
+      const ioT = ask('태성정밀 발주서 거래유형 코드 IO_TYPE (비워도 됨 · 보통 "부가세율 적용")', t.ioType || '');
+      const ioF = ask('플로우텍 발주서 거래유형 코드 IO_TYPE (비워도 됨 · 보통 "부가세미적용/영세")', f.ioType || '');
       const next = {
         taesung: {
           comCode: ask('태성정밀 COM_CODE', t.comCode || '76811'),
@@ -67,6 +71,7 @@
           apiKey:  ask('태성정밀 API_CERT_KEY', t.apiKey || ''),
           zone:    ask('태성정밀 ZONE (예: CC)',  t.zone   || 'CC'),
           empCd:   empT,
+          ioType:  ioT,
           isTest,
         },
         flowtech: {
@@ -75,6 +80,7 @@
           apiKey:  ask('플로우텍 API_CERT_KEY', f.apiKey || ''),
           zone:    ask('플로우텍 ZONE (예: CA)',  f.zone   || 'CA'),
           empCd:   empF,
+          ioType:  ioF,
           isTest,
         },
       };
@@ -165,12 +171,13 @@
 
   // ─── 대시보드 페이지에 노출 ─────────────────────────────────
   const relay = {
-    __version: '1.0.1',
+    __version: '1.0.2',
     __installed: true,
     __isTest: function () { const c = getCreds(); return !!(c && c.taesung && c.taesung.isTest); },
     setupCreds: setupCreds,
     hasCreds: function () { const c = getCreds(); return !!(c && c.taesung && c.taesung.apiKey && c.flowtech && c.flowtech.apiKey); },
     getEmpCd: function (company) { const c = getCreds(); return (c && c[company] && c[company].empCd) || ''; },
+    getIoType: function (company) { const c = getCreds(); return (c && c[company] && c[company].ioType) || ''; },
     login: login,
     savePurchaseOrder: savePurchaseOrder,
     savePurchase: savePurchase,
