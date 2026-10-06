@@ -1042,6 +1042,11 @@
           <div id="poErpStatus" style="font-size:12px; color:var(--ink-soft); margin-bottom:8px;">—</div>
           <button type="button" class="btn ghost" id="poErpSendBtn" style="width:100%;">📤 ERP 발주서 전송</button>
         </div>
+        <div class="erp-row" id="poImpRow" style="display:none; margin-top:10px; padding:12px; border:1px solid var(--line); border-radius:8px; background:#f7f9f8;">
+          <div style="font-size:12px; font-weight:700; color:var(--ink-soft); margin-bottom:6px;">수입품 입고처리 (플로우텍 구매 → 태성 판매 → 태성 구매)</div>
+          <div id="poImpStatus" style="font-size:12px; color:var(--ink-soft); margin-bottom:8px; line-height:1.7;">—</div>
+          <button type="button" class="btn ghost" id="poImpSendBtn" style="width:100%;">📤 입고처리 전송 (3건)</button>
+        </div>
         <div class="panel-actions">
           <button type="button" class="btn ghost" id="poCancelBtn">취소</button>
           <button type="button" class="btn ghost" id="poDuplicateBtn" style="display:none;">⧉ 이 건 복제하기 (분할 입고용)</button>
@@ -3229,6 +3234,7 @@ function openPoPanel(id){
   updateFieldsetFillState();
   syncShareDisplays();
   refreshErpRow('po', id);       // ERP 자동입력 섹션 상태 갱신
+  refreshImportRow(id);          // 수입품 입고처리(3건) 섹션
   if(id) highlightRows([id]); else clearRowHighlights();
   poOverlay.classList.add('active');
 }
@@ -4346,6 +4352,13 @@ function apprBadge(p){
 }
 // ERP 발주서 전송 완료 뱃지 — 전표번호가 저장된 건만 표시
 function erpBadge(p){
+  if(!p) return '';
+  const imp = p.ecountImport || {};
+  const impBadge = (imp.fPurchase && imp.fSale && imp.tPurchase)
+    ? '<span class="item-badge" style="background:#7c3aed;" title="플로우텍 구매 #'+imp.fPurchase+' · 판매 #'+imp.fSale+' · 태성 구매 #'+imp.tPurchase+'">태성입고 ✓</span>' : '';
+  return erpPoBadge(p) + impBadge;
+}
+function erpPoBadge(p){
   if(!p || !p.ecountPoSlip) return '';
   if(p.ecountPoClosed) return '<span class="item-badge" style="background:#16a34a;" title="ECOUNT 발주서 종결 — 구매(입고)입력 완료 · 전표#'+p.ecountPoSlip+'">입고 ✓</span>';
   return '<span class="item-badge" style="background:#0d9488;" title="ECOUNT 발주서 전송완료 · 전표#'+p.ecountPoSlip+(p.ecountPoAt?' · '+p.ecountPoAt:'')+'">ERP ✓</span>';
@@ -5206,6 +5219,182 @@ document.addEventListener('click', (e) => {
   e.preventDefault();
   clearErpRecord(a.getAttribute('data-clear-erp'));
 });
+
+/* ---------------- 수입품 입고처리 (전표 3건 한 번에) ----------------
+ * 공장입고일이 입력된 해외발주 1건에 대해 차례로:
+ *   ① 플로우텍 구매입력  — 해외 공급사 → 플로우텍, CI 외화금액 그대로, 부가세 미적용
+ *   ② 플로우텍 판매입력  — 플로우텍 → 태성정밀, 판매단가(원화), 부가세 10%
+ *   ③ 태성정밀 구매입력  — 플로우텍 → 태성정밀, ②와 같은 가격, 부가세 10%
+ * 단계마다 전표번호를 p.ecountImport 에 저장 → 중간에 실패해도 다시 누르면 남은 단계만 진행(중복 입력 없음). */
+const ECOUNT_TAESUNG_CUST_IN_FLOWTECH = '1348127126';   // 플로우텍 이카운트의 "태성정밀" 거래처코드
+const ECOUNT_FLOWTECH_CUST_IN_TAESUNG = '7688801817';   // 태성 이카운트의 "플로우텍" 거래처코드
+const IMPORT_COST_RATE = 0.10;    // 부대비용률(운임·관세·통관 등) — 자재판매가산출 설정
+const IMPORT_MARGIN    = 0.30;    // 이윤율 — 판매가 = 입고원가 ÷ (1 − 이윤율)
+const IMPORT_ROUND     = 100;     // 판매단가 올림 단위(원)
+// 이카운트 API 경로·본문 이름 — 여기만 고치면 된다(유저스크립트 재설치 불필요)
+const ECOUNT_API = {
+  purchase: { path: '/OAPI/V2/Purchases/SavePurchases', list: 'PurchasesList' },
+  sale:     { path: '/OAPI/V2/Sale/SaveSale',           list: 'SaleList' },
+};
+const IMPORT_STEPS = [
+  { key: 'fPurchase', label: '① 플로우텍 구매입력' },
+  { key: 'fSale',     label: '② 플로우텍 판매입력 (→ 태성)' },
+  { key: 'tPurchase', label: '③ 태성 구매입력 (← 플로우텍)' },
+];
+
+// 이카운트 저장 응답 해석 — 발주서와 같은 규칙
+function parseEcountSave(res){
+  const data = res && res.Data || {};
+  const detail = Array.isArray(data.ResultDetails) ? data.ResultDetails[0] : null;
+  const ok = !!(detail && detail.IsSuccess) || data.SuccessCnt > 0 || !!(detail && String(detail.Status) === '200');
+  if(!ok){
+    const err = (detail && detail.TotalError && !/OK/.test(detail.TotalError)) ? detail.TotalError
+              : (detail && detail.Errors && JSON.stringify(detail.Errors))
+              || (res && res.Error && res.Error.Message)
+              || JSON.stringify(res).slice(0, 300);
+    return {ok:false, err};
+  }
+  const slip = detail && Array.isArray(detail.SlipNos) && detail.SlipNos.length ? String(detail.SlipNos[0]) : '(전표번호 미반환)';
+  return {ok:true, slip};
+}
+
+// 가격 계산 — 엑셀 "자재판매가산출" 과 같은 방식
+function computeImportPricing(p){
+  const qty = parseFloat(p.ciQty) || parseFloat(p.qty) || 0;
+  const ciAmt = parseFloat(p.ciAmount) || 0;
+  const piAmt = parseFloat(p.piAmount) || 0;
+  const amtF = ciAmt > 0 ? ciAmt : piAmt;             // 외화 총액 — CI 기준, 없으면 PI
+  const currency = (p.currency === 'CNY') ? 'CNY' : 'USD';
+  const rate = (currency === 'CNY') ? (fxRates.cny || 0) : (fxRates.krw || 0);
+  const unitF = qty > 0 ? amtF / qty : 0;             // 외화 단가
+  const costUnit = unitF * rate * (1 + IMPORT_COST_RATE);                       // 입고원가(원/개)
+  const saleUnit = costUnit > 0 ? Math.ceil(costUnit / (1 - IMPORT_MARGIN) / IMPORT_ROUND) * IMPORT_ROUND : 0;  // 판매단가(원/개)
+  const saleSupply = saleUnit * qty;
+  return {
+    qty, currency, rate, usedCi: ciAmt > 0,
+    amtF, unitF: Math.round(unitF * 10000) / 10000,
+    amtKrw: Math.round(amtF * rate),
+    costUnit: Math.round(costUnit),
+    saleUnit, saleSupply, saleVat: Math.round(saleSupply * 0.1),
+  };
+}
+
+function buildImportPayloads(p){
+  const cust = supplierEcountCode(p.supplier);
+  if(!cust) throw new Error('공급사 "' + (p.supplier||'(미지정)') + '" 의 ECOUNT 거래처코드가 없습니다. "거래처" 탭에서 등록해주세요.');
+  if(!p.itemCode) throw new Error('품목코드가 비어있습니다.');
+  const pr = computeImportPricing(p);
+  if(!pr.qty) throw new Error('수량이 비어있습니다.');
+  if(!pr.amtF) throw new Error('CI금액(또는 PI금액)이 비어있습니다.');
+  if(!pr.rate) throw new Error('환율이 비어있습니다. 대시보드의 환율을 먼저 입력해주세요.');
+  const r = window.ecountRelay;
+  const empF = (r && r.getEmpCd) ? r.getEmpCd('flowtech') : '';
+  const empT = (r && r.getEmpCd) ? r.getEmpCd('taesung') : '';
+  const ioDate = toYmd8(p.warehouseDate) || todayYmd();        // 전표일자 = 공장입고일
+  const prod = String(p.itemCode).trim();
+  const memo = '[발주현황 입고처리] ' + (p.ciNo ? 'CI#' + p.ciNo + ' · ' : '') + (p.itemName || '').slice(0, 50);
+  const base = { UPLOAD_SER_NO: '1', IO_DATE: ioDate, WH_CD: ECOUNT_WH_CD, PROD_CD: prod, QTY: String(pr.qty), REMARKS: memo };
+  const fPurchase = Object.assign({}, base, {
+    CUST: cust, EMP_CD: empF,
+    EXCHANGE_TYPE: ecountFxCode(pr.currency), EXCHANGE_RATE: String(pr.rate),
+    PRICE: String(pr.unitF), SUPPLY_AMT_F: String(pr.amtF), SUPPLY_AMT: String(pr.amtKrw), VAT_AMT: '0',
+  });
+  const ioF = ecountIoType('flowtech'); if(ioF) fPurchase.IO_TYPE = ioF;   // 22 = 부가세율 미적용
+  const fSale = Object.assign({}, base, {
+    CUST: ECOUNT_TAESUNG_CUST_IN_FLOWTECH, EMP_CD: empF,
+    PRICE: String(pr.saleUnit), SUPPLY_AMT: String(pr.saleSupply), VAT_AMT: String(pr.saleVat),
+  });
+  const tPurchase = Object.assign({}, base, {
+    CUST: ECOUNT_FLOWTECH_CUST_IN_TAESUNG, EMP_CD: empT,
+    PRICE: String(pr.saleUnit), SUPPLY_AMT: String(pr.saleSupply), VAT_AMT: String(pr.saleVat),
+  });
+  const ioT = ecountIoType('taesung'); if(ioT) tPurchase.IO_TYPE = ioT;
+  return { pr, ioDate, steps: {
+    fPurchase: { company:'flowtech', api: ECOUNT_API.purchase, data: fPurchase },
+    fSale:     { company:'flowtech', api: ECOUNT_API.sale,     data: fSale },
+    tPurchase: { company:'taesung',  api: ECOUNT_API.purchase, data: tPurchase },
+  }};
+}
+
+function refreshImportRow(id){
+  const row = document.getElementById('poImpRow');
+  const statusEl = document.getElementById('poImpStatus');
+  const btn = document.getElementById('poImpSendBtn');
+  if(!row) return;
+  const p = id ? pos.find(x => x.id === id) : null;
+  if(!p){ row.style.display = 'none'; return; }
+  row.style.display = '';
+  const imp = p.ecountImport || {};
+  const done = IMPORT_STEPS.filter(s => imp[s.key]).length;
+  const lines = IMPORT_STEPS.map(s => (imp[s.key] ? '✅ ' : '⬜ ') + s.label + (imp[s.key] ? ' · 전표 <b>' + imp[s.key] + '</b>' : ''));
+  let head = '';
+  if(!p.warehouseDate){
+    head = '<div style="color:#b45309; font-weight:700;">공장입고일을 입력하고 저장하면 전송할 수 있어요.</div>';
+  }else if(done === IMPORT_STEPS.length){
+    head = '<div style="color:#16a34a; font-weight:700;">📦 입고처리 완료 (3건 모두 전송)' + (imp.at ? ' · ' + imp.at : '') + '</div>';
+  }
+  statusEl.innerHTML = head + lines.join('<br>');
+  btn.disabled = !p.warehouseDate || done === IMPORT_STEPS.length;
+  btn.textContent = done === 0 ? '📤 입고처리 전송 (3건)'
+                  : done < IMPORT_STEPS.length ? '📤 남은 단계 이어서 전송 (' + (IMPORT_STEPS.length - done) + '건)'
+                  : '✅ 전송 완료';
+}
+
+async function sendImportFromPanel(){
+  const chk = ecountRelayStatus();
+  if(!chk.ok){ toast(chk.msg, 7000); return; }
+  const id = editingPoId;
+  const p = id ? pos.find(x => x.id === id) : null;
+  if(!p){ toast('저장된 발주를 먼저 열어주세요.'); return; }
+  if(!p.warehouseDate){ toast('공장입고일을 입력하고 저장한 뒤 눌러주세요.'); return; }
+  let built;
+  try{ built = buildImportPayloads(p); }catch(e){ toast(e.message, 7000); return; }
+  const {pr, ioDate, steps} = built;
+  p.ecountImport = p.ecountImport || {};
+  const todo = IMPORT_STEPS.filter(s => !p.ecountImport[s.key]);
+  if(!todo.length){ toast('이미 3건 모두 전송했습니다.'); return; }
+
+  const sym = pr.currency === 'CNY' ? '¥' : '$';
+  const won = v => '₩' + Number(v).toLocaleString();
+  const msg =
+    '아래 내용으로 이카운트에 전표 ' + todo.length + '건을 입력합니다.\n\n' +
+    '전표일자: ' + ioDate + ' (공장입고일)\n' +
+    '품목: ' + p.itemCode + ' · 수량 ' + pr.qty.toLocaleString() + '\n' +
+    (pr.usedCi ? '' : '⚠️ CI금액이 없어 PI금액으로 계산합니다\n') + '\n' +
+    (p.ecountImport.fPurchase ? '' : '① 플로우텍 구매입력 (' + (p.supplier||'') + ')\n   외화 ' + sym + Number(pr.amtF).toLocaleString(undefined,{maximumFractionDigits:2}) + ' × 환율 ' + pr.rate + ' = ' + won(pr.amtKrw) + ' · 부가세 없음\n') +
+    (p.ecountImport.fSale ? '' : '② 플로우텍 판매입력 (→ 태성정밀)\n') +
+    (p.ecountImport.tPurchase ? '' : '③ 태성 구매입력 (← 플로우텍)\n') +
+    '   ②③ 판매단가 ' + won(pr.saleUnit) + ' (입고원가 ' + won(pr.costUnit) + ' ÷ 0.7, 100원 올림)\n' +
+    '   공급가액 ' + won(pr.saleSupply) + ' · 부가세 ' + won(pr.saleVat) + '\n';
+  if(!confirm(msg)) return;
+
+  const btn = document.getElementById('poImpSendBtn');
+  if(btn){ btn.disabled = true; btn.textContent = '전송 중...'; }
+  let sent = 0;
+  try{
+    for(const s of todo){
+      const st = steps[s.key];
+      const res = await chk.relay.rawCall(st.company, st.api.path, { [st.api.list]: [{ BulkDatas: st.data }] });
+      console.log('[입고처리] ' + s.label + ' 응답', res);
+      const r = parseEcountSave(res);
+      if(!r.ok) throw new Error(s.label + ' 실패: ' + r.err);
+      p.ecountImport[s.key] = r.slip;
+      sent++;
+      await savePos();              // 단계마다 저장 — 다음 단계가 실패해도 이미 들어간 전표는 기억
+      refreshImportRow(id);
+    }
+    p.ecountImport.at = nowLocalStr();
+    await savePos();
+    render();
+    toast('✅ 입고처리 전송 완료 (' + sent + '건)', 6000);
+  }catch(err){
+    console.error('[입고처리 실패]', err);
+    toast('❌ ' + (err && err.message || '전송 실패') + (sent ? ' · 앞의 ' + sent + '건은 입력됨, 다시 누르면 남은 단계만 진행' : ''), 10000);
+  }finally{
+    refreshImportRow(id);
+  }
+}
+document.getElementById('poImpSendBtn').addEventListener('click', sendImportFromPanel);
 
 /* ---------------- Tabs ---------------- */
 function switchToView(name){
