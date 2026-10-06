@@ -1498,6 +1498,44 @@ function extractStock(r){
   }
   return null;
 }
+// 같은 품목코드를 예전에 발주한 공급사 찾기 — 가장 최근 요청일 기준.
+// 정확히 같은 코드가 없으면 점(.) 앞 기본코드가 같은 품목(예: TF-AC7802 ↔ TF-AC7802.BN)으로 찾는다.
+function guessSupplier(code){
+  code = String(code || '').trim();
+  if(!code) return null;
+  const all = [];
+  pos.forEach(p => { if(p.supplier && p.itemCode) all.push({p, kind:'po'}); });
+  domesticPos.forEach(p => { if(p.supplier && p.itemCode) all.push({p, kind:'dom'}); });
+  const latest = list => list.sort((a,b) => (b.p.reqDate||'').localeCompare(a.p.reqDate||''))[0];
+  let hit = latest(all.filter(x => String(x.p.itemCode).trim() === code));
+  let byBase = false;
+  if(!hit){
+    const base = code.split('.')[0];
+    if(base && base !== code){
+      hit = latest(all.filter(x => String(x.p.itemCode).trim().split('.')[0] === base));
+      byBase = !!hit;
+    }
+  }
+  return hit ? { supplier: hit.p.supplier, kind: hit.kind, byBase } : null;
+}
+// 구매요청 → 국내발주 레코드로 변환
+function reqToDom(r, supplier){
+  const stock = extractStock(r);
+  return {
+    id: 'dom_' + Date.now() + '_' + Math.random().toString(36).slice(2,6),
+    srcId: String(r.id||''),
+    itemCode: r.code || '',
+    itemName: r.itemName || '',
+    qty: r.qty || '',
+    stock: stock==null ? '' : stock,
+    dueDate: r.dueDate || '',
+    reqDate: r.createdAt || '',
+    requester: r.requester || '',
+    note: (r.note||'').trim(),
+    supplier: supplier || '',
+    depositDeferred:false, balanceDeferred:false,
+  };
+}
 // 구매요청 → 해외발주(po) 레코드로 변환
 function reqToPo(r){
   const stock = extractStock(r);
@@ -1627,18 +1665,33 @@ async function pullPurchaseRequests(){
       }
       return;
     }
-    if(!confirm('새 구매요청 ' + fresh.length + '건을 해외발주로 등록할까요?\n\n' +
-      fresh.slice(0,5).map(r=>'· ' + (r.itemName||r.code) + ' ' + (r.qty||'')).join('\n') +
-      (fresh.length>5 ? '\n… 외 ' + (fresh.length-5) + '건' : ''))) {
+    // 예전에 같은 품목을 발주한 공급사를 찾아 자동으로 채우고, 국내에서 샀던 품목이면 국내발주건으로 보낸다
+    const plan = fresh.map(r => ({ r, g: guessSupplier(r.code) }));
+    const nOv = plan.filter(x => !x.g || x.g.kind !== 'dom').length;
+    const nDom = plan.length - nOv;
+    const nNoSup = plan.filter(x => !x.g).length;
+    if(!confirm('새 구매요청 ' + fresh.length + '건을 등록할까요?\n' +
+      '(해외발주 ' + nOv + '건 · 국내발주 ' + nDom + '건' + (nNoSup ? ' · 공급사 못 찾음 ' + nNoSup + '건' : '') + ')\n\n' +
+      plan.slice(0,8).map(x => '· ' + (x.r.itemName||x.r.code) + ' ' + (x.r.qty||'') + ' → '
+        + (x.g ? (x.g.kind === 'dom' ? '국내' : '해외') + ' · ' + x.g.supplier + (x.g.byBase ? ' (비슷한 품목코드 기준)' : '') : '해외 · 공급사 직접 입력 필요')).join('\n') +
+      (plan.length>8 ? '\n… 외 ' + (plan.length-8) + '건' : ''))) {
       // 새 건은 거절했어도 재고 갱신은 유효하게 저장
       if(stockUpdated){ await savePos(); await saveDomesticPos(); render(); toast('재고 ' + stockUpdated + '건을 갱신했습니다'); }
       return;
     }
-    fresh.forEach(r => pos.push(reqToPo(r)));
+    plan.forEach(({r, g}) => {
+      if(g && g.kind === 'dom'){
+        domesticPos.push(reqToDom(r, g.supplier));
+      }else{
+        const po = reqToPo(r);
+        if(g) po.supplier = g.supplier;
+        pos.push(po);
+      }
+    });
     await savePos();
-    if(stockUpdated) await saveDomesticPos();
+    await saveDomesticPos();
     render();
-    toast(fresh.length + '건을 해외발주로 등록했습니다' + (stockUpdated ? ' · 재고 ' + stockUpdated + '건도 갱신' : ''));
+    toast('해외 ' + nOv + '건 · 국내 ' + nDom + '건 등록' + (nNoSup ? ' (공급사 못 찾음 ' + nNoSup + '건 — 직접 입력해주세요)' : '') + (stockUpdated ? ' · 재고 ' + stockUpdated + '건 갱신' : ''), 7000);
   }catch(err){
     console.error(err);
     toast('가져오기 실패: ' + (err && err.message ? err.message : '알 수 없는 오류'));
