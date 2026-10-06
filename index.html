@@ -4885,7 +4885,10 @@ async function syncErpOrderStatus(){
           PROD_CD: '', CUST_CD: '',
           ListParam: { PAGE_CURRENT: page, PAGE_SIZE: 100, BASE_DATE_FROM: from, BASE_DATE_TO: to },
         });
-        const arr = (res && res.Data && Array.isArray(res.Data.Result)) ? res.Data.Result : [];
+        let result = res && res.Data && res.Data.Result;
+        if(typeof result === 'string'){ try{ result = JSON.parse(result); }catch(e){ result = []; } }
+        const arr = Array.isArray(result) ? result : [];
+        if(!arr.length && page === 1) console.log('[ERP 상태] ' + co + ' ' + from + '~' + to + ' 응답:', res);
         rows.push(...arr);
         if(arr.length < 100) break;
       }
@@ -4905,6 +4908,7 @@ async function syncErpOrderStatus(){
         const cands = rows.filter(x => near.includes(String(x.ORD_DATE)) && String(x.CUST) === cust && parseFloat(x.QTY) === qty);
         if(cands.length === 1) row = cands[0];
       }
+      console.log('[ERP 상태] ' + (p.itemName||p.itemCode) + ' · 전표 ' + p.ecountPoSlip + ' →', row ? ('P_FLAG=' + row.P_FLAG) : '발주서조회에서 못 찾음', row || '');
       if(!row) return;
       const realSlip = String(row.ORD_DATE) + '-' + String(row.ORD_NO);
       if(p.ecountPoSlip !== realSlip){ p.ecountPoSlip = realSlip; filled++; }
@@ -4925,11 +4929,12 @@ async function syncErpOrderStatus(){
 async function runErpStatusSync(){
   try{
     const res = await syncErpOrderStatus();
-    if(res && (res.closed || res.filled)){
-      toast('📦 ERP 확인: 입고처리 ' + res.closed + '건' + (res.filled ? ' · 전표번호 ' + res.filled + '건 채움' : ''), 6000);
+    if(res && res.checked){
+      toast('📦 ERP 발주서 확인 ' + res.checked + '건 · 입고처리 ' + res.closed + '건' + (res.filled ? ' · 전표번호 ' + res.filled + '건 채움' : ''), 6000);
     }
   }catch(e){
     console.warn('[ERP 상태 확인 실패]', e);
+    toast('ERP 발주서 확인 실패: ' + (e && e.message || '') + ' (F12 콘솔 참고)', 7000);
   }
 }
 
