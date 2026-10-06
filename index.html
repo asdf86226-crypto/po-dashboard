@@ -1644,7 +1644,10 @@ async function pullPurchaseRequests(){
 document.addEventListener('DOMContentLoaded', ()=>{
   const b = document.getElementById('btnPullReq');
   if(b){
-    b.addEventListener('click', pullPurchaseRequests);
+    b.addEventListener('click', async () => {
+      await pullPurchaseRequests();
+      await runErpStatusSync();   // ERP에 전송한 발주서가 입고처리(종결)됐는지 확인
+    });
     // 우클릭 시 연결 주소 변경
     b.addEventListener('contextmenu', (e)=>{
       e.preventDefault();
@@ -4344,6 +4347,7 @@ function apprBadge(p){
 // ERP 발주서 전송 완료 뱃지 — 전표번호가 저장된 건만 표시
 function erpBadge(p){
   if(!p || !p.ecountPoSlip) return '';
+  if(p.ecountPoClosed) return '<span class="item-badge" style="background:#16a34a;" title="ECOUNT 발주서 종결 — 구매(입고)입력 완료 · 전표#'+p.ecountPoSlip+'">입고 ✓</span>';
   return '<span class="item-badge" style="background:#0d9488;" title="ECOUNT 발주서 전송완료 · 전표#'+p.ecountPoSlip+(p.ecountPoAt?' · '+p.ecountPoAt:'')+'">ERP ✓</span>';
 }
 
@@ -4804,7 +4808,8 @@ function refreshErpRow(kind, id){
   const p = list.find(x => x.id === id);
   if(!p){ row.style.display = 'none'; return; }
   if(p.ecountPoSlip){
-    statusEl.innerHTML = '✅ 전송 완료 · 전표번호 <b>' + p.ecountPoSlip + '</b>' + (p.ecountPoAt ? ' · ' + p.ecountPoAt : '')
+    statusEl.innerHTML = (p.ecountPoClosed ? '<div style="color:#16a34a; font-weight:700; margin-bottom:4px;">📦 입고처리 완료 (ERP 발주서 종결)</div>' : '')
+      + '✅ 전송 완료 · 전표번호 <b>' + p.ecountPoSlip + '</b>' + (p.ecountPoAt ? ' · ' + p.ecountPoAt : '')
       + ' <a href="#" data-clear-erp="' + kind + '" style="margin-left:8px; font-size:11px; color:#dc2626; text-decoration:underline;">전송기록 삭제</a>';
     btn.textContent = '🔁 다시 전송 (덮어쓰기 아님 — 새 전표 생성)';
     btn.classList.remove('brass'); btn.classList.add('ghost');
@@ -4822,13 +4827,110 @@ async function clearErpRecord(kind){
   const p = list.find(x => x.id === id);
   if(!p || !p.ecountPoSlip) return;
   if(!confirm('이 발주의 ERP 전송기록(전표#' + p.ecountPoSlip + ')을 대시보드에서 지울까요?\n\n참고: ERP(이카운트)의 전표는 삭제되지 않습니다. 이카운트에서 이미 삭제했을 때 대시보드만 맞춰주려는 용도예요.')) return;
-  delete p.ecountPoSlip;
-  delete p.ecountPoAt;
-  delete p.ecountPoCompany;
+  ['ecountPoSlip','ecountPoAt','ecountPoIoDate','ecountPoCompany','ecountPoClosed','ecountPoClosedAt'].forEach(k => delete p[k]);
   if(kind === 'dom') await saveDomesticPos(); else await savePos();
   refreshErpRow(kind, id);
   render();
   toast('ERP 전송기록을 삭제했습니다');
+}
+
+function nowLocalStr(){
+  const d = new Date(), z = n => String(n).padStart(2,'0');
+  return d.getFullYear()+'-'+z(d.getMonth()+1)+'-'+z(d.getDate())+' '+z(d.getHours())+':'+z(d.getMinutes());
+}
+
+/* ---- ERP 발주서 상태 동기화 (발주서조회 API) ----
+ * 자재 담당자가 발주서를 불러와 구매입력하면 ECOUNT 가 발주서를 "종결(P_FLAG=9)" 로 바꾼다.
+ * 전송된 발주 중 아직 입고 표시가 안 된 건만 골라 발주서조회로 상태를 확인하고,
+ * 종결된 건은 ecountPoClosed=true 로 표시 → 목록 뱃지가 "입고 ✓" 로 바뀐다.
+ * 전표번호가 비어 있던 건("(전표번호 미반환)")은 일자·거래처·수량으로 찾아서 번호도 채워 넣는다. */
+function ymdAddDays(ymd, n){
+  const d = new Date(+ymd.slice(0,4), +ymd.slice(4,6)-1, +ymd.slice(6,8) + n);
+  const z = v => String(v).padStart(2,'0');
+  return d.getFullYear() + z(d.getMonth()+1) + z(d.getDate());
+}
+function erpSlipDate(p){
+  const m = /^(\d{8})-/.exec(p.ecountPoSlip || '');
+  if(m) return m[1];
+  if(p.ecountPoIoDate) return p.ecountPoIoDate;
+  return toYmd8((p.ecountPoAt || '').slice(0, 10));
+}
+
+async function syncErpOrderStatus(){
+  const r = (typeof window !== 'undefined' && window.ecountRelay) || null;
+  if(!r || !r.hasCreds || !r.hasCreds() || typeof r.rawCall !== 'function') return null;
+  const targets = [];
+  pos.forEach(p => { if(p.ecountPoSlip && !p.ecountPoClosed) targets.push({p, kind:'po'}); });
+  domesticPos.forEach(p => { if(p.ecountPoSlip && !p.ecountPoClosed) targets.push({p, kind:'dom'}); });
+  if(!targets.length) return {checked:0, closed:0, filled:0};
+
+  const byCo = {};
+  targets.forEach(t => {
+    const co = t.p.ecountPoCompany || (t.kind === 'dom' ? 'taesung' : 'flowtech');
+    (byCo[co] = byCo[co] || []).push(t);
+  });
+
+  let checked = 0, closed = 0, filled = 0;
+  for(const co in byCo){
+    const list = byCo[co];
+    const dates = list.map(t => erpSlipDate(t.p)).filter(Boolean).sort();
+    if(!dates.length) continue;
+    // 조회 기간은 한 번에 최대 30일 — 앞뒤 하루 여유를 두고 30일 단위로 나눠 조회
+    const start = ymdAddDays(dates[0], -1), end = ymdAddDays(dates[dates.length-1], 1);
+    const rows = [];
+    for(let from = start; from <= end; from = ymdAddDays(from, 30)){
+      const to = ymdAddDays(from, 29) < end ? ymdAddDays(from, 29) : end;
+      for(let page = 1; page <= 20; page++){
+        const res = await r.rawCall(co, '/OAPI/V2/Purchases/GetPurchasesOrderList', {
+          PROD_CD: '', CUST_CD: '',
+          ListParam: { PAGE_CURRENT: page, PAGE_SIZE: 100, BASE_DATE_FROM: from, BASE_DATE_TO: to },
+        });
+        const arr = (res && res.Data && Array.isArray(res.Data.Result)) ? res.Data.Result : [];
+        rows.push(...arr);
+        if(arr.length < 100) break;
+      }
+    }
+    console.log('[ERP 상태] ' + co + ' 발주서조회 ' + rows.length + '건');
+    const bySlip = {};
+    rows.forEach(row => { bySlip[String(row.ORD_DATE) + '-' + String(row.ORD_NO)] = row; });
+
+    list.forEach(t => {
+      checked++;
+      const p = t.p;
+      let row = bySlip[p.ecountPoSlip];
+      if(!row){
+        // 전표번호를 모르는 건 — 일자(±1일)·거래처·수량이 정확히 하나만 맞으면 그 발주서로 본다
+        const d = erpSlipDate(p), cust = supplierEcountCode(p.supplier), qty = parseFloat(p.qty);
+        const near = [ymdAddDays(d,-1), d, ymdAddDays(d,1)];
+        const cands = rows.filter(x => near.includes(String(x.ORD_DATE)) && String(x.CUST) === cust && parseFloat(x.QTY) === qty);
+        if(cands.length === 1) row = cands[0];
+      }
+      if(!row) return;
+      const realSlip = String(row.ORD_DATE) + '-' + String(row.ORD_NO);
+      if(p.ecountPoSlip !== realSlip){ p.ecountPoSlip = realSlip; filled++; }
+      if(String(row.P_FLAG) === '9'){
+        p.ecountPoClosed = true;
+        p.ecountPoClosedAt = row.UPDATE_DATE || '';
+        closed++;
+      }
+    });
+  }
+  if(closed || filled){
+    await savePos(); await saveDomesticPos();
+    render();
+  }
+  return {checked, closed, filled};
+}
+
+async function runErpStatusSync(){
+  try{
+    const res = await syncErpOrderStatus();
+    if(res && (res.closed || res.filled)){
+      toast('📦 ERP 확인: 입고처리 ' + res.closed + '건' + (res.filled ? ' · 전표번호 ' + res.filled + '건 채움' : ''), 6000);
+    }
+  }catch(e){
+    console.warn('[ERP 상태 확인 실패]', e);
+  }
 }
 
 function supplierEcountCode(name){
@@ -5006,8 +5108,11 @@ async function sendErpPoFromPanel(kind){
     }
     const slip = detail && Array.isArray(detail.SlipNos) && detail.SlipNos.length ? String(detail.SlipNos[0]) : '(전표번호 미반환)';
     p.ecountPoSlip = slip;
-    p.ecountPoAt = new Date().toISOString().slice(0, 16).replace('T', ' ');
+    p.ecountPoAt = nowLocalStr();
+    p.ecountPoIoDate = payload.IO_DATE;   // 발주서 일자 — 나중에 발주서조회로 상태 확인할 때 사용
     p.ecountPoCompany = company;
+    delete p.ecountPoClosed;
+    delete p.ecountPoClosedAt;
     if(kind === 'dom') await saveDomesticPos(); else await savePos();
     refreshErpRow(kind, id);
     render();
