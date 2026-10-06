@@ -5333,7 +5333,8 @@ function refreshImportRow(id){
   }else if(done === IMPORT_STEPS.length){
     head = '<div style="color:#16a34a; font-weight:700;">📦 입고처리 완료 (3건 모두 전송)' + (imp.at ? ' · ' + imp.at : '') + '</div>';
   }
-  statusEl.innerHTML = head + lines.join('<br>');
+  statusEl.innerHTML = head + lines.join('<br>')
+    + (done ? '<div style="margin-top:6px;"><a href="#" data-clear-import="1" style="font-size:11px; color:#dc2626; text-decoration:underline;">입고처리 전송기록 삭제</a></div>' : '');
   btn.disabled = !p.warehouseDate || done === IMPORT_STEPS.length;
   btn.textContent = done === 0 ? '📤 입고처리 전송 (3건)'
                   : done < IMPORT_STEPS.length ? '📤 남은 단계 이어서 전송 (' + (IMPORT_STEPS.length - done) + '건)'
@@ -5395,6 +5396,22 @@ async function sendImportFromPanel(){
   }
 }
 document.getElementById('poImpSendBtn').addEventListener('click', sendImportFromPanel);
+// 입고처리 전송기록만 지우기 — 이카운트에서 전표를 직접 지운 뒤 대시보드를 맞추는 용도
+document.addEventListener('click', async (e) => {
+  const a = e.target.closest && e.target.closest('a[data-clear-import]');
+  if(!a) return;
+  e.preventDefault();
+  const p = editingPoId ? pos.find(x => x.id === editingPoId) : null;
+  if(!p || !p.ecountImport) return;
+  const imp = p.ecountImport;
+  const list = IMPORT_STEPS.filter(s => imp[s.key]).map(s => s.label + ' #' + imp[s.key]).join('\n');
+  if(!confirm('대시보드에서 입고처리 전송기록을 지울까요?\n\n' + list + '\n\n※ 이카운트 전표는 지워지지 않습니다. 이카운트에서 먼저 직접 지워주세요.')) return;
+  delete p.ecountImport;
+  await savePos();
+  refreshImportRow(p.id);
+  render();
+  toast('입고처리 전송기록을 지웠습니다');
+});
 
 /* ---------------- Tabs ---------------- */
 function switchToView(name){
