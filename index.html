@@ -5030,6 +5030,21 @@ function makeOrderBase(company, cust, itemCode, qty, pricePerUnit, remarks, opts
   return base;
 }
 
+// 이카운트에 등록된 외화코드 — USD 는 그대로 통하지만 위안화는 회사마다 'RMB' 나 '00002' 처럼 다르게 등록돼 있다.
+// 기초등록 > 외화등록 에서 확인한 값을 이 브라우저에 저장해 둔다.
+const ECOUNT_FX_KEY = 'ecountFxCodes';
+function ecountFxCode(cur){
+  try{ const m = JSON.parse(localStorage.getItem(ECOUNT_FX_KEY) || '{}'); if(m[cur]) return m[cur]; }catch(e){}
+  return cur;
+}
+function setEcountFxCode(cur, code){
+  try{
+    const m = JSON.parse(localStorage.getItem(ECOUNT_FX_KEY) || '{}');
+    m[cur] = code;
+    localStorage.setItem(ECOUNT_FX_KEY, JSON.stringify(m));
+  }catch(e){}
+}
+
 // 거래유형(IO_TYPE) 코드를 Tampermonkey 자격에서 꺼낸다 — 회사별로 저장돼 있을 수 있음
 function ecountIoType(company){
   const r = (typeof window !== 'undefined' && window.ecountRelay) || null;
@@ -5053,7 +5068,7 @@ function buildOverseasOrderPayload(p){
     '[발주현황 자동입력] ' + (p.piNo ? 'PI#' + p.piNo + ' · ' : '') + (p.itemName || '').slice(0, 60),
     {
       vat: false,
-      exchangeType: currency,
+      exchangeType: ecountFxCode(currency),
       exchangeRate: rate,
       ioType: ecountIoType('flowtech'),
       dueDate: toYmd8(p.dueDate),
@@ -5158,7 +5173,23 @@ async function sendErpPoFromPanel(kind){
     toast('✅ ERP 발주서 전송 완료 · 전표번호 ' + slip, 5000);
   }catch(err){
     console.error('[ECOUNT 발주서 전송 실패]', err);
-    toast('❌ ' + (err && err.message || '전송 실패 — 콘솔 참고'), 9000);
+    const msg = (err && err.message) || '';
+    // 외화코드가 이카운트에 없는 경우 — 올바른 코드를 물어보고 저장해 둔다
+    if(kind !== 'dom' && /통화|미등록코드/.test(msg) && payload && payload.EXCHANGE_TYPE){
+      const cur = (p.currency === 'CNY') ? 'CNY' : 'USD';
+      const code = prompt(
+        '이카운트에 "' + payload.EXCHANGE_TYPE + '" 라는 외화코드가 없습니다.\n\n' +
+        '이카운트 → 재고 I → 기초등록 → 외화등록 에서 ' + (cur === 'CNY' ? '위안화' : '달러') +
+        '의 외화코드(또는 외화명)를 확인해서 입력해 주세요.\n(예: RMB, 00002)',
+        ''
+      );
+      if(code && code.trim()){
+        setEcountFxCode(cur, code.trim());
+        toast('외화코드 "' + code.trim() + '" 저장 · "ERP 발주서 전송"을 다시 눌러주세요', 7000);
+        return;
+      }
+    }
+    toast('❌ ' + (msg || '전송 실패 — 콘솔 참고'), 9000);
   }finally{
     if(btn){ btn.disabled = false; btn.textContent = old; }
   }
