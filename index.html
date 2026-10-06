@@ -4860,9 +4860,10 @@ async function syncErpOrderStatus(){
   const r = (typeof window !== 'undefined' && window.ecountRelay) || null;
   if(!r || !r.hasCreds || !r.hasCreds() || typeof r.rawCall !== 'function') return null;
   const targets = [];
-  pos.forEach(p => { if(p.ecountPoSlip && !p.ecountPoClosed) targets.push({p, kind:'po'}); });
-  domesticPos.forEach(p => { if(p.ecountPoSlip && !p.ecountPoClosed) targets.push({p, kind:'dom'}); });
-  if(!targets.length) return {checked:0, closed:0, filled:0};
+  // 이미 "입고 ✓" 인 건도 다시 확인한다 — 구매입력이 취소되면 발주서가 진행중으로 돌아가므로 표시도 되돌려야 함
+  pos.forEach(p => { if(p.ecountPoSlip) targets.push({p, kind:'po'}); });
+  domesticPos.forEach(p => { if(p.ecountPoSlip) targets.push({p, kind:'dom'}); });
+  if(!targets.length) return {checked:0, closed:0, filled:0, reopened:0};
 
   const byCo = {};
   targets.forEach(t => {
@@ -4870,7 +4871,7 @@ async function syncErpOrderStatus(){
     (byCo[co] = byCo[co] || []).push(t);
   });
 
-  let checked = 0, closed = 0, filled = 0;
+  let checked = 0, closed = 0, filled = 0, reopened = 0;
   for(const co in byCo){
     const list = byCo[co];
     const dates = list.map(t => erpSlipDate(t.p)).filter(Boolean).sort();
@@ -4927,7 +4928,7 @@ async function syncErpOrderStatus(){
         if(cands.length === 1) row = cands[0];
         else if(cands.length > 1 && cands.every(x => String(x.P_FLAG) === '9')){
           // 어느 건인지는 못 정해도 후보가 전부 종결이면 입고 처리된 것은 확실
-          p.ecountPoClosed = true; closed++;
+          if(!p.ecountPoClosed){ p.ecountPoClosed = true; closed++; }
           console.log('[ERP 상태] ' + (p.itemName||p.itemCode) + ' → 후보 ' + cands.length + '건 모두 종결, 입고 처리로 표시');
           return;
         }
@@ -4937,24 +4938,33 @@ async function syncErpOrderStatus(){
       const realSlip = String(row.ORD_DATE) + '-' + String(row.ORD_NO);
       if(p.ecountPoSlip !== realSlip){ p.ecountPoSlip = realSlip; filled++; }
       if(String(row.P_FLAG) === '9'){
-        p.ecountPoClosed = true;
-        p.ecountPoClosedAt = row.UPDATE_DATE || '';
-        closed++;
+        if(!p.ecountPoClosed){
+          p.ecountPoClosed = true;
+          p.ecountPoClosedAt = row.UPDATE_DATE || '';
+          closed++;
+        }
+      }else if(p.ecountPoClosed){
+        // 구매입력 취소 등으로 발주서가 다시 진행중 → 입고 표시 해제
+        delete p.ecountPoClosed;
+        delete p.ecountPoClosedAt;
+        reopened++;
       }
     });
   }
-  if(closed || filled){
+  if(closed || filled || reopened){
     await savePos(); await saveDomesticPos();
     render();
   }
-  return {checked, closed, filled};
+  return {checked, closed, filled, reopened};
 }
 
 async function runErpStatusSync(){
   try{
     const res = await syncErpOrderStatus();
     if(res && res.checked){
-      toast('📦 ERP 발주서 확인 ' + res.checked + '건 · 입고처리 ' + res.closed + '건' + (res.filled ? ' · 전표번호 ' + res.filled + '건 채움' : ''), 6000);
+      toast('📦 ERP 발주서 확인 ' + res.checked + '건 · 새로 입고 ' + res.closed + '건'
+        + (res.reopened ? ' · 입고취소 ' + res.reopened + '건' : '')
+        + (res.filled ? ' · 전표번호 ' + res.filled + '건 채움' : ''), 6000);
     }
   }catch(e){
     console.warn('[ERP 상태 확인 실패]', e);
