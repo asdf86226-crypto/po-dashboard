@@ -2363,9 +2363,10 @@ function checkPiGroupMismatch(piNo){
 }
 
 function computeStageIndex(po){
-  // 선금 100%인 건은 잔금 자체가 없으므로 잔금 단계도 이미 처리된 것으로 취급한다.
-  // (그러지 않으면 ERP입력까지 다 끝났어도 잔금 단계가 카운트되지 않아 품질검수완료에서 멈춘다)
-  const balanceDone = isBalanceDone(po) || isDepositFull(po);
+  // 선금 100%인 건은 잔금 자체가 없으므로, 선금을 실제로 냈고 CI까지 받으면 잔금 단계도 끝난 것으로 본다.
+  // (선금 지급 전에 미리 세면 PI만 받은 건이 "선금지급완료"로 보이고,
+  //  아예 안 세면 ERP입력까지 끝나도 "품질검수완료"에서 멈춘다)
+  const balanceDone = isBalanceDone(po) || (isDepositFull(po) && isDepositDone(po) && !!po.ciDate);
   const milestones = [po.piDate, isDepositDone(po), po.ciDate, balanceDone, po.shipDate, po.etaDate, po.warehouseDate, po.qcDate, po.erpDate];
   let count = 0;
   milestones.forEach(m=>{ if(m) count++; });
