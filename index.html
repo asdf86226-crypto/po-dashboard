@@ -4905,8 +4905,32 @@ async function syncErpOrderStatus(){
         // 전표번호를 모르는 건 — 일자(±1일)·거래처·수량이 정확히 하나만 맞으면 그 발주서로 본다
         const d = erpSlipDate(p), cust = supplierEcountCode(p.supplier), qty = parseFloat(p.qty);
         const near = [ymdAddDays(d,-1), d, ymdAddDays(d,1)];
-        const cands = rows.filter(x => near.includes(String(x.ORD_DATE)) && String(x.CUST) === cust && parseFloat(x.QTY) === qty);
+        let cands = rows.filter(x => near.includes(String(x.ORD_DATE)) && String(x.CUST) === cust && parseFloat(x.QTY) === qty);
+        // 같은 날·같은 거래처·같은 수량이 여럿이면 금액 → 납기일 순으로 좁힌다
+        if(cands.length > 1){
+          let byAmt;
+          if(t.kind === 'dom'){
+            const unit = parseFloat(p.unitPrice) || 0;
+            const expect = unit > 0 ? Math.round(qty * unit) : Math.round(parseFloat(p.poAmount) || 0);
+            byAmt = cands.filter(x => Math.abs((parseFloat(x.BUY_AMT) || 0) - expect) <= 1);
+          }else{
+            const pi = parseFloat(p.piAmount) || 0;
+            byAmt = cands.filter(x => Math.abs((parseFloat(x.BUY_AMT_F) || 0) - pi) <= 1);
+          }
+          if(byAmt.length) cands = byAmt;
+        }
+        if(cands.length > 1){
+          const due = toYmd8(p.dueDate);
+          const byDue = cands.filter(x => String(x.TIME_DATE) === due);
+          if(byDue.length) cands = byDue;
+        }
         if(cands.length === 1) row = cands[0];
+        else if(cands.length > 1 && cands.every(x => String(x.P_FLAG) === '9')){
+          // 어느 건인지는 못 정해도 후보가 전부 종결이면 입고 처리된 것은 확실
+          p.ecountPoClosed = true; closed++;
+          console.log('[ERP 상태] ' + (p.itemName||p.itemCode) + ' → 후보 ' + cands.length + '건 모두 종결, 입고 처리로 표시');
+          return;
+        }
       }
       console.log('[ERP 상태] ' + (p.itemName||p.itemCode) + ' · 전표 ' + p.ecountPoSlip + ' →', row ? ('P_FLAG=' + row.P_FLAG) : '발주서조회에서 못 찾음', row || '');
       if(!row) return;
