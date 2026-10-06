@@ -4810,6 +4810,7 @@ function refreshErpRow(kind, id){
   if(p.ecountPoSlip){
     statusEl.innerHTML = (p.ecountPoClosed ? '<div style="color:#16a34a; font-weight:700; margin-bottom:4px;">📦 입고처리 완료 (ERP 발주서 종결)</div>' : '')
       + '✅ 전송 완료 · 전표번호 <b>' + p.ecountPoSlip + '</b>' + (p.ecountPoAt ? ' · ' + p.ecountPoAt : '')
+      + (erpRecordEnv(p) === 'test' ? ' <span style="color:#b45309; font-weight:700;">(테스트 서버)</span>' : '')
       + ' <a href="#" data-clear-erp="' + kind + '" style="margin-left:8px; font-size:11px; color:#dc2626; text-decoration:underline;">전송기록 삭제</a>';
     btn.textContent = '🔁 다시 전송 (덮어쓰기 아님 — 새 전표 생성)';
     btn.classList.remove('brass'); btn.classList.add('ghost');
@@ -4827,12 +4828,21 @@ async function clearErpRecord(kind){
   const p = list.find(x => x.id === id);
   if(!p || !p.ecountPoSlip) return;
   if(!confirm('이 발주의 ERP 전송기록(전표#' + p.ecountPoSlip + ')을 대시보드에서 지울까요?\n\n참고: ERP(이카운트)의 전표는 삭제되지 않습니다. 이카운트에서 이미 삭제했을 때 대시보드만 맞춰주려는 용도예요.')) return;
-  ['ecountPoSlip','ecountPoAt','ecountPoIoDate','ecountPoCompany','ecountPoClosed','ecountPoClosedAt'].forEach(k => delete p[k]);
+  ERP_RECORD_FIELDS.forEach(k => delete p[k]);
   if(kind === 'dom') await saveDomesticPos(); else await savePos();
   refreshErpRow(kind, id);
   render();
   toast('ERP 전송기록을 삭제했습니다');
 }
+
+const ERP_RECORD_FIELDS = ['ecountPoSlip','ecountPoAt','ecountPoIoDate','ecountPoCompany','ecountPoEnv','ecountPoClosed','ecountPoClosedAt'];
+// 지금 Tampermonkey 에 저장된 키가 테스트키인지 운영키인지
+function currentErpEnv(){
+  const r = (typeof window !== 'undefined' && window.ecountRelay) || null;
+  return (r && typeof r.__isTest === 'function' && !r.__isTest()) ? 'prod' : 'test';
+}
+// 전송기록의 서버 — 이 표시가 생기기 전 기록은 모두 테스트 서버로 보낸 것
+function erpRecordEnv(p){ return p.ecountPoEnv || 'test'; }
 
 function nowLocalStr(){
   const d = new Date(), z = n => String(n).padStart(2,'0');
@@ -4861,8 +4871,10 @@ async function syncErpOrderStatus(){
   if(!r || !r.hasCreds || !r.hasCreds() || typeof r.rawCall !== 'function') return null;
   const targets = [];
   // 이미 "입고 ✓" 인 건도 다시 확인한다 — 구매입력이 취소되면 발주서가 진행중으로 돌아가므로 표시도 되돌려야 함
-  pos.forEach(p => { if(p.ecountPoSlip) targets.push({p, kind:'po'}); });
-  domesticPos.forEach(p => { if(p.ecountPoSlip) targets.push({p, kind:'dom'}); });
+  // 지금 연결된 서버(테스트/운영)로 보낸 기록만 확인 — 서로 다른 서버의 전표번호는 겹칠 수 있다
+  const env = currentErpEnv();
+  pos.forEach(p => { if(p.ecountPoSlip && erpRecordEnv(p) === env) targets.push({p, kind:'po'}); });
+  domesticPos.forEach(p => { if(p.ecountPoSlip && erpRecordEnv(p) === env) targets.push({p, kind:'dom'}); });
   if(!targets.length) return {checked:0, closed:0, filled:0, reopened:0};
 
   const byCo = {};
@@ -4958,8 +4970,22 @@ async function syncErpOrderStatus(){
   return {checked, closed, filled, reopened};
 }
 
+// 운영키로 바꾼 뒤 처음 확인할 때, 테스트 서버로 보냈던 전송기록을 지울지 한 번 묻는다
+async function offerTestRecordCleanup(){
+  if(currentErpEnv() !== 'prod') return;
+  const testRecs = [...pos, ...domesticPos].filter(p => p.ecountPoSlip && erpRecordEnv(p) === 'test');
+  if(!testRecs.length) return;
+  try{ if(sessionStorage.getItem('erpTestCleanupAsked')) return; sessionStorage.setItem('erpTestCleanupAsked', '1'); }catch(e){}
+  if(!confirm('운영 서버로 연결됐습니다.\n\n테스트 서버로 보냈던 ERP 전송기록이 ' + testRecs.length + '건 있습니다.\n이 기록(ERP ✓ / 입고 ✓ 뱃지)을 대시보드에서 지울까요?\n\n※ 이카운트 쪽은 아무것도 바뀌지 않습니다.\n※ 지우지 않아도 운영 서버 확인에는 섞이지 않습니다.')) return;
+  testRecs.forEach(p => ERP_RECORD_FIELDS.forEach(k => delete p[k]));
+  await savePos(); await saveDomesticPos();
+  render();
+  toast('테스트 전송기록 ' + testRecs.length + '건을 지웠습니다');
+}
+
 async function runErpStatusSync(){
   try{
+    await offerTestRecordCleanup();
     const res = await syncErpOrderStatus();
     if(res && res.checked){
       toast('📦 ERP 발주서 확인 ' + res.checked + '건 · 새로 입고 ' + res.closed + '건'
@@ -5167,6 +5193,7 @@ async function sendErpPoFromPanel(kind){
     p.ecountPoAt = nowLocalStr();
     p.ecountPoIoDate = payload.IO_DATE;   // 발주서 일자 — 나중에 발주서조회로 상태 확인할 때 사용
     p.ecountPoCompany = company;
+    p.ecountPoEnv = currentErpEnv();      // 테스트 서버 / 운영 서버 중 어디로 보냈는지
     delete p.ecountPoClosed;
     delete p.ecountPoClosedAt;
     if(kind === 'dom') await saveDomesticPos(); else await savePos();
