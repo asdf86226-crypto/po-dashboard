@@ -5033,9 +5033,11 @@ function makeOrderBase(company, cust, itemCode, qty, pricePerUnit, remarks, opts
 // 이카운트에 등록된 외화코드 — USD 는 그대로 통하지만 위안화는 회사마다 'RMB' 나 '00002' 처럼 다르게 등록돼 있다.
 // 기초등록 > 외화등록 에서 확인한 값을 이 브라우저에 저장해 둔다.
 const ECOUNT_FX_KEY = 'ecountFxCodes';
+// 플로우텍 이카운트 기본값 — 위안화는 외화코드 00002 (해외발주는 항상 플로우텍으로 감)
+const ECOUNT_FX_DEFAULT = { USD: 'USD', CNY: '00002' };
 function ecountFxCode(cur){
   try{ const m = JSON.parse(localStorage.getItem(ECOUNT_FX_KEY) || '{}'); if(m[cur]) return m[cur]; }catch(e){}
-  return cur;
+  return ECOUNT_FX_DEFAULT[cur] || cur;
 }
 function setEcountFxCode(cur, code){
   try{
