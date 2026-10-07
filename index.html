@@ -1224,6 +1224,30 @@
   </div>
 </div>
 
+<!-- 구매요청 가져오기 — 품목별 해외/국내·공급사 선택 -->
+<div class="overlay" id="reqImportOverlay">
+  <div class="panel" style="width:min(760px,96vw);">
+    <div class="panel-head">
+      <h2 id="reqImportTitle">새 구매요청 등록</h2>
+      <button class="panel-close" id="reqImportClose" type="button">&times;</button>
+    </div>
+    <div class="panel-body">
+      <div style="font-size:12.5px; color:var(--ink-soft); margin-bottom:10px; line-height:1.6;">
+        예전에 발주한 품목은 그때의 구분·공급사가 미리 채워져 있어요. 처음 보는 품목만 골라주세요.
+      </div>
+      <div style="display:flex; gap:6px; margin-bottom:10px; flex-wrap:wrap;">
+        <button type="button" class="btn ghost" id="reqImportAllDom" style="flex:0 0 auto; padding:6px 12px;">처음 보는 품목 모두 국내로</button>
+        <button type="button" class="btn ghost" id="reqImportAllOv" style="flex:0 0 auto; padding:6px 12px;">처음 보는 품목 모두 해외로</button>
+      </div>
+      <div id="reqImportBody" style="font-size:12.5px; border-top:1px solid var(--line);"></div>
+      <div class="panel-actions">
+        <button type="button" class="btn ghost" id="reqImportCancel">취소</button>
+        <button type="button" class="btn brass" id="reqImportOk">등록</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <script>
@@ -1518,6 +1542,64 @@ function guessSupplier(code){
   }
   return hit ? { supplier: hit.p.supplier, kind: hit.kind, byBase } : null;
 }
+// 구매요청 가져오기 선택 창 — 품목별로 구분(해외/국내)·공급사를 고른다.
+// 예전 발주 이력이 있으면 그 값으로 채우고, 처음 보는 품목은 지난번에 고른 구분을 기본으로 한다.
+// 등록 → [{r, kind:'po'|'dom', supplier}] / 취소 → null
+const REQ_DEFAULT_KIND_KEY = 'reqImportDefaultKind';
+function showReqImportDialog(plan){
+  return new Promise(resolve => {
+    const overlay = document.getElementById('reqImportOverlay');
+    const body = document.getElementById('reqImportBody');
+    let defKind = 'po';
+    try{ defKind = localStorage.getItem(REQ_DEFAULT_KIND_KEY) || 'po'; }catch(e){}
+    const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+    const supOptions = (kind, sel) => {
+      const list = suppliers.filter(s => kind === 'dom' ? s.type === 'domestic' : s.type !== 'domestic').map(s => s.name);
+      if(sel && !list.includes(sel)) list.unshift(sel);
+      return '<option value="">(직접 입력 예정)</option>' + list.map(n => '<option value="' + esc(n) + '"' + (n === sel ? ' selected' : '') + '>' + esc(n) + '</option>').join('');
+    };
+    document.getElementById('reqImportTitle').textContent = '새 구매요청 ' + plan.length + '건 등록';
+    body.innerHTML = plan.map((x, i) => {
+      const kind = x.g ? x.g.kind : defKind;
+      const hint = x.g ? (x.g.byBase ? '비슷한 품목코드 이력' : '발주 이력') : '처음 보는 품목';
+      return '<div class="ri-row" data-i="' + i + '" data-new="' + (x.g ? '0' : '1') + '" style="display:flex; flex-wrap:wrap; align-items:center; gap:8px; padding:10px 2px; border-bottom:1px solid var(--line);">'
+        + '<div style="flex:1 1 220px; min-width:0;"><b>' + esc(x.r.itemName || '-') + '</b> <span style="color:var(--ink-soft);">· ' + esc(x.r.qty || '') + '개</span>'
+        + '<div style="font-size:11px; color:var(--ink-soft);">' + esc(x.r.code || '') + ' · <span style="color:' + (x.g ? '#0d9488' : '#b45309') + ';">' + hint + '</span></div></div>'
+        + '<select class="ri-kind" style="flex:0 0 auto; width:auto; padding:6px 8px;"><option value="po"' + (kind === 'po' ? ' selected' : '') + '>해외</option><option value="dom"' + (kind === 'dom' ? ' selected' : '') + '>국내</option></select>'
+        + '<select class="ri-sup" style="flex:0 0 170px; width:170px; padding:6px 8px;">' + supOptions(kind, x.g ? x.g.supplier : '') + '</select>'
+        + '</div>';
+    }).join('');
+    // 구분을 바꾸면 그 구분의 거래처 목록으로 공급사 선택지를 바꾼다
+    body.querySelectorAll('.ri-row').forEach(tr => {
+      const k = tr.querySelector('.ri-kind'), s = tr.querySelector('.ri-sup');
+      k.addEventListener('change', () => { s.innerHTML = supOptions(k.value, s.value); });
+    });
+    const setNewKind = kind => body.querySelectorAll('.ri-row[data-new="1"] .ri-kind').forEach(k => { k.value = kind; k.dispatchEvent(new Event('change')); });
+    const finish = result => {
+      overlay.classList.remove('active');
+      ['reqImportOk','reqImportCancel','reqImportClose','reqImportAllDom','reqImportAllOv'].forEach(id => {
+        const el = document.getElementById(id); el.replaceWith(el.cloneNode(true));   // 이벤트 정리
+      });
+      resolve(result);
+    };
+    document.getElementById('reqImportAllDom').addEventListener('click', () => setNewKind('dom'));
+    document.getElementById('reqImportAllOv').addEventListener('click', () => setNewKind('po'));
+    document.getElementById('reqImportCancel').addEventListener('click', () => finish(null));
+    document.getElementById('reqImportClose').addEventListener('click', () => finish(null));
+    document.getElementById('reqImportOk').addEventListener('click', () => {
+      const out = [];
+      let lastNewKind = null;
+      body.querySelectorAll('.ri-row').forEach(tr => {
+        const kind = tr.querySelector('.ri-kind').value;
+        if(tr.dataset.new === '1') lastNewKind = kind;
+        out.push({ r: plan[+tr.dataset.i].r, kind, supplier: tr.querySelector('.ri-sup').value });
+      });
+      if(lastNewKind){ try{ localStorage.setItem(REQ_DEFAULT_KIND_KEY, lastNewKind); }catch(e){} }
+      finish(out);
+    });
+    overlay.classList.add('active');
+  });
+}
 // 구매요청 → 국내발주 레코드로 변환
 function reqToDom(r, supplier){
   const stock = extractStock(r);
@@ -1665,33 +1747,24 @@ async function pullPurchaseRequests(){
       }
       return;
     }
-    // 예전에 같은 품목을 발주한 공급사를 찾아 자동으로 채우고, 국내에서 샀던 품목이면 국내발주건으로 보낸다
+    // 예전에 같은 품목을 발주한 공급사·구분을 미리 채우고, 품목별로 해외/국내·공급사를 고르게 한다
     const plan = fresh.map(r => ({ r, g: guessSupplier(r.code) }));
-    const nOv = plan.filter(x => !x.g || x.g.kind !== 'dom').length;
-    const nDom = plan.length - nOv;
-    const nNoSup = plan.filter(x => !x.g).length;
-    if(!confirm('새 구매요청 ' + fresh.length + '건을 등록할까요?\n' +
-      '(해외발주 ' + nOv + '건 · 국내발주 ' + nDom + '건' + (nNoSup ? ' · 공급사 못 찾음 ' + nNoSup + '건' : '') + ')\n\n' +
-      plan.slice(0,8).map(x => '· ' + (x.r.itemName||x.r.code) + ' ' + (x.r.qty||'') + ' → '
-        + (x.g ? (x.g.kind === 'dom' ? '국내' : '해외') + ' · ' + x.g.supplier + (x.g.byBase ? ' (비슷한 품목코드 기준)' : '') : '해외 · 공급사 직접 입력 필요')).join('\n') +
-      (plan.length>8 ? '\n… 외 ' + (plan.length-8) + '건' : ''))) {
-      // 새 건은 거절했어도 재고 갱신은 유효하게 저장
+    const chosen = await showReqImportDialog(plan);
+    if(!chosen){
+      // 새 건은 취소했어도 재고 갱신은 유효하게 저장
       if(stockUpdated){ await savePos(); await saveDomesticPos(); render(); toast('재고 ' + stockUpdated + '건을 갱신했습니다'); }
       return;
     }
-    plan.forEach(({r, g}) => {
-      if(g && g.kind === 'dom'){
-        domesticPos.push(reqToDom(r, g.supplier));
-      }else{
-        const po = reqToPo(r);
-        if(g) po.supplier = g.supplier;
-        pos.push(po);
-      }
+    let nOv = 0, nDom = 0, nNoSup = 0;
+    chosen.forEach(({r, kind, supplier}) => {
+      if(!supplier) nNoSup++;
+      if(kind === 'dom'){ domesticPos.push(reqToDom(r, supplier)); nDom++; }
+      else{ const po = reqToPo(r); po.supplier = supplier || ''; pos.push(po); nOv++; }
     });
     await savePos();
     await saveDomesticPos();
     render();
-    toast('해외 ' + nOv + '건 · 국내 ' + nDom + '건 등록' + (nNoSup ? ' (공급사 못 찾음 ' + nNoSup + '건 — 직접 입력해주세요)' : '') + (stockUpdated ? ' · 재고 ' + stockUpdated + '건 갱신' : ''), 7000);
+    toast('해외 ' + nOv + '건 · 국내 ' + nDom + '건 등록' + (nNoSup ? ' (공급사 미지정 ' + nNoSup + '건)' : '') + (stockUpdated ? ' · 재고 ' + stockUpdated + '건 갱신' : ''), 7000);
   }catch(err){
     console.error(err);
     toast('가져오기 실패: ' + (err && err.message ? err.message : '알 수 없는 오류'));
