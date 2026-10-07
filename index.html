@@ -173,6 +173,20 @@
   .poc-group-head .poc-act.mail:hover{background:#115ea3;}
   .poc-group-head .poc-mail-to{font-size:11px; font-weight:600; color:#c8cfdc;}
   .poc-group-head .poc-mail-to.none{color:#fbbf24;}
+  /* 메일 첨부용 PDF 만들 때만 쓰는 모양 (인쇄 모양과 같게) */
+  .poc-pdf-stage{background:#fff; color:#111;}
+  .poc-pdf-stage .poc-group{border:1px solid #999; border-radius:0; margin:0; background:#fff;}
+  .poc-pdf-stage .poc-letterhead{padding:14px 18px 12px; border-bottom:2px solid #16233d;}
+  .poc-pdf-stage .poc-letterhead .lh-name{font-size:18px; font-weight:800; color:#16233d; letter-spacing:.3px; margin:0 0 4px;}
+  .poc-pdf-stage .poc-letterhead .lh-line{font-size:11.5px; color:#333; line-height:1.5; margin:2px 0;}
+  .poc-pdf-stage .poc-letterhead .lh-po-title{font-size:14px; font-weight:800; color:#16233d; margin-top:8px; letter-spacing:.5px;}
+  .poc-pdf-stage .poc-group-head{background:#eee; color:#111;}
+  .poc-pdf-stage .poc-group-head .sub{color:#444;}
+  .poc-pdf-stage .poc-table{min-width:0;}
+  .poc-pdf-stage .poc-table th{padding:7px 6px; font-size:10.5px; white-space:normal;}
+  .poc-pdf-stage .poc-table td{padding:7px 6px; font-size:11px; color:#111; white-space:normal; word-break:keep-all; overflow-wrap:break-word; vertical-align:middle;}
+  .poc-pdf-stage .poc-table td:first-child, .poc-pdf-stage .poc-table th:first-child{padding-left:10px;}
+  .poc-pdf-stage .item-badge{font-size:9px; padding:1px 4px;}
   .poc-table{width:100%; border-collapse:collapse; table-layout:fixed;}
   .poc-table th{background:#eef2f4; color:var(--ink-soft); font-size:11.5px; font-weight:700; text-align:left; padding:8px 12px; border-bottom:1px solid var(--line);}
   .poc-table td{padding:9px 12px; border-bottom:1px solid var(--line); font-size:13px;}
@@ -767,6 +781,8 @@
         <button class="btn ghost" id="pocReset">초기화</button>
         <button class="btn ghost" id="pocDownload">⬇ CSV 다운로드</button>
         <button class="btn brass" id="pocPrint">🖨 발주서 인쇄/PDF</button>
+        <button class="btn ghost" id="pocMsSetup" title="아웃룩(마이크로소프트 365)에 연결하면 메일 쓰기 때 PDF가 첨부된 메일이 임시보관함에 만들어져요">⚙ 아웃룩 연결</button>
+        <button class="btn ghost" id="pocMailAll" title="모든 업체의 발주서 메일을 아웃룩 임시보관함에 한 번에 만들어요">✉ 전체 업체 메일 만들기</button>
       </div>
     </div>
 
@@ -3995,12 +4011,12 @@ function printPocGroup(gi){
   window.print();
   setTimeout(restore, 1000); // afterprint 를 안 쏘는 브라우저 대비
 }
-// 메일 본문 — 국내는 한글, 해외는 영문. 주소창 길이 제한이 있어 품목이 많으면 "외 N건" 으로 줄임.
-function buildPocMail(supName, items, supRec){
+// 메일 제목·본문 — 국내는 한글, 해외는 영문
+function pocMailParts(supName, items, supRec){
   const isEn = !items.some(p=>p._isDom);
   const today = isoDate(new Date());
   const contact = (supRec && supRec.contact) ? supRec.contact.trim() : '';
-  let subject, head, foot, lineOf, moreOf;
+  let subject, head, foot, lineOf, moreOf, fileName;
   if(isEn){
     const sender = COMPANY_PROFILES.flowtech_en.name;
     subject = `[${sender}] Purchase Order - ${today}`;
@@ -4008,6 +4024,7 @@ function buildPocMail(supName, items, supRec){
     lineOf = (p,i)=> `${i+1}. ${p.itemCode||'-'} / ${p.itemName||'-'} / Qty ${fmtQty(p.qty)}${p.dueDate ? ' / Requested delivery ' + p.dueDate : ''}`;
     moreOf = n=> `... and ${n} more item${n>1?'s':''} (see attached PO)`;
     foot = `\n\nKindly confirm receipt and let us know the delivery schedule.\n\nBest regards,\n${sender}`;
+    fileName = `PO_${pocFileSafe(supName)}_${today}.pdf`;
   } else {
     const sender = COMPANY_PROFILES[pocDomCompanyKey()].name;
     const total = items.filter(p=>p._isDom).reduce((s,p)=>{
@@ -4020,47 +4037,289 @@ function buildPocMail(supName, items, supRec){
     moreOf = n=> `... 외 ${n}건 (첨부 발주서 참고)`;
     foot = (total > 0 ? `\n\n총 매입가 : ${fmtKrw(total)} (부가세 별도)` : '')
       + `\n\n확인 후 납기 회신 부탁드립니다.\n감사합니다.\n\n${sender} 드림`;
+    fileName = `발주서_${pocFileSafe(supName)}_${today}.pdf`;
   }
-  const to = normEmails(supRec && supRec.email);
-  const cc = normEmails(supRec && supRec.emailCc);
+  return {
+    isEn, subject, head, foot, moreOf, fileName,
+    lines: items.map(lineOf),
+    to: normEmails(supRec && supRec.email),
+    cc: normEmails(supRec && supRec.emailCc),
+  };
+}
+// mailto 주소 — 주소창 길이 제한이 있어 품목이 많으면 "외 N건" 으로 줄임
+function buildPocMail(supName, items, supRec){
+  const m = pocMailParts(supName, items, supRec);
   const makeUrl = lines=>{
     const qs = [];
-    if(cc) qs.push('cc=' + encodeURIComponent(cc));
-    qs.push('subject=' + encodeURIComponent(subject));
-    qs.push('body=' + encodeURIComponent(head + lines.join('\n') + foot));
-    return 'mailto:' + to.split(';').map(x=>encodeURIComponent(x).replace(/%40/g,'@')).join(';') + '?' + qs.join('&');
+    if(m.cc) qs.push('cc=' + encodeURIComponent(m.cc));
+    qs.push('subject=' + encodeURIComponent(m.subject));
+    qs.push('body=' + encodeURIComponent(m.head + lines.join('\n') + m.foot));
+    return 'mailto:' + m.to.split(';').map(x=>encodeURIComponent(x).replace(/%40/g,'@')).join(';') + '?' + qs.join('&');
   };
-  const all = items.map(lineOf);
+  const all = m.lines;
   const LIMIT = 1900; // 윈도우/아웃룩 주소 길이 한도(약 2000자) 안쪽
   let n = all.length;
   let url = makeUrl(all);
   while(url.length > LIMIT && n > 1){
     n--;
-    url = makeUrl(all.slice(0, n).concat(moreOf(all.length - n)));
+    url = makeUrl(all.slice(0, n).concat(m.moreOf(all.length - n)));
   }
-  return { url, to, subject, shown: n, total: all.length };
+  return { url, to: m.to, subject: m.subject, fileName: m.fileName, shown: n, total: all.length };
+}
+
+// ─── 발주서 PDF 파일 만들기 (인쇄 창 없이) ──────────────────────
+// vendor/ 폴더의 도구는 필요할 때만 불러온다 (대시보드 첫 화면 속도 영향 없음)
+const _scriptLoads = {};
+function loadScriptOnce(src){
+  if(!_scriptLoads[src]){
+    _scriptLoads[src] = new Promise((resolve, reject)=>{
+      const s = document.createElement('script');
+      s.src = src;
+      s.onload = resolve;
+      s.onerror = ()=>{ delete _scriptLoads[src]; reject(new Error(src + ' 를 불러오지 못했습니다')); };
+      document.head.appendChild(s);
+    });
+  }
+  return _scriptLoads[src];
+}
+// 인쇄용 묶음(레터헤드 포함)을 복사해 A4 PDF로 만든다. 반환: jsPDF 객체
+async function makePocPdf(gi, quality){
+  await loadScriptOnce('vendor/html2pdf.bundle.min.js');
+  const src = document.querySelector(`#pocResultPrint .poc-group[data-poc-gi="${gi}"]`);
+  if(!src) throw new Error('발주서 내용을 찾지 못했습니다');
+  const stage = document.createElement('div');
+  stage.className = 'poc-pdf-stage';
+  stage.appendChild(src.cloneNode(true));
+  // A4 폭에 맞게 칸 너비 조정 (국내 8칸: 단가·매입가 포함)
+  const cols = stage.querySelectorAll('colgroup col');
+  const widths = cols.length === 8 ? [11,13,23,7,10,12,11,13] : cols.length === 6 ? [12,14,28,8,14,24] : null;
+  if(widths) cols.forEach((c, i)=>{ c.style.width = widths[i] + '%'; });
+  const q = quality || {scale:2, jpeg:0.92};
+  return html2pdf().set({
+    margin: [10, 10, 10, 10],
+    image: { type:'jpeg', quality:q.jpeg },
+    html2canvas: { scale:q.scale, backgroundColor:'#ffffff', logging:false },
+    jsPDF: { unit:'mm', format:'a4', orientation:'portrait' },
+    pagebreak: { mode:['css','legacy'], avoid:['tr', '.poc-letterhead', '.poc-group-head'] },
+  }).from(stage).toPdf().get('pdf');
+}
+// 메일 첨부용 base64 — 너무 크면(약 3MB 이상) 화질을 낮춰 다시 만든다
+async function makePocPdfBase64(gi){
+  let b64 = (await makePocPdf(gi)).output('datauristring').split(',')[1];
+  if(b64.length > 3500000) b64 = (await makePocPdf(gi, {scale:1.4, jpeg:0.8})).output('datauristring').split(',')[1];
+  return b64;
+}
+async function downloadPocPdf(gi){
+  const g = pocGroupsCache[gi];
+  if(!g) return;
+  const m = pocMailParts(g[0], g[1], findSupplierByName(g[0]));
+  (await makePocPdf(gi)).save(m.fileName);
+  return m.fileName;
+}
+
+// ─── 아웃룩(마이크로소프트 365) 연결 — PDF 첨부된 메일을 임시보관함에 만들기 ───
+// 마이크로소프트 앱 등록 정보(클라이언트 ID·테넌트 ID)는 비밀번호가 아니라 이 브라우저에만 저장.
+// 로그인은 마이크로소프트 창에서 직접 하고, 대시보드는 비밀번호를 보지 않는다.
+const MS_CFG_KEY = 'msGraphCfg';
+const MS_SCOPES = ['Mail.ReadWrite'];
+const GUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function getMsCfg(){
+  try{
+    const c = JSON.parse(localStorage.getItem(MS_CFG_KEY) || 'null');
+    return (c && c.clientId) ? c : null;
+  }catch(e){ return null; }
+}
+function msRedirectUri(){ return new URL('auth.html', location.href).href.split('#')[0].split('?')[0]; }
+let _msalApp = null, _msalKey = '';
+async function getMsalApp(){
+  const cfg = getMsCfg();
+  if(!cfg) throw new Error('아웃룩 연결 설정이 없습니다');
+  await loadScriptOnce('vendor/msal-browser.min.js');
+  const key = cfg.clientId + '|' + cfg.tenantId;
+  if(!_msalApp || _msalKey !== key){
+    _msalApp = new msal.PublicClientApplication({
+      auth: {
+        clientId: cfg.clientId,
+        authority: 'https://login.microsoftonline.com/' + (cfg.tenantId || 'organizations'),
+        redirectUri: msRedirectUri(),
+      },
+      cache: { cacheLocation:'localStorage' },
+    });
+    await _msalApp.initialize();
+    _msalKey = key;
+  }
+  return _msalApp;
+}
+async function getMsToken(){
+  const app = await getMsalApp();
+  const cfg = getMsCfg();
+  const accs = app.getAllAccounts();
+  const acc = accs.find(a=> a.tenantId === cfg.tenantId) || accs[0];
+  if(acc){
+    try{ return (await app.acquireTokenSilent({ scopes:MS_SCOPES, account:acc })).accessToken; }
+    catch(e){ /* 만료·권한 변경 → 아래 로그인 창으로 */ }
+  }
+  const r = await app.acquireTokenPopup({ scopes:MS_SCOPES, prompt: acc ? undefined : 'select_account' });
+  return r.accessToken;
+}
+async function graphCall(token, method, path, body){
+  const res = await fetch('https://graph.microsoft.com/v1.0' + path, {
+    method,
+    headers: { Authorization:'Bearer ' + token, 'Content-Type':'application/json' },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const text = await res.text();
+  let json = null; try{ json = JSON.parse(text); }catch(e){}
+  if(!res.ok){
+    const msg = (json && json.error && (json.error.code + ': ' + json.error.message)) || text.slice(0, 300);
+    const err = new Error('메일 서버 오류 ' + res.status + ' — ' + msg);
+    err.status = res.status;
+    throw err;
+  }
+  return json;
+}
+async function createOutlookDraft(token, m, pdfB64){
+  const rcpt = s=> normEmails(s).split(';').filter(Boolean).map(a=>({ emailAddress:{ address:a } }));
+  return graphCall(token, 'POST', '/me/messages', {
+    subject: m.subject,
+    body: { contentType:'Text', content: m.head + m.lines.join('\n') + m.foot },
+    toRecipients: rcpt(m.to),
+    ccRecipients: rcpt(m.cc),
+    attachments: [{
+      '@odata.type': '#microsoft.graph.fileAttachment',
+      name: m.fileName,
+      contentType: 'application/pdf',
+      contentBytes: pdfB64,
+    }],
+  });
+}
+// 마이크로소프트 쪽 오류를 쉬운 말로
+function msErrorText(e){
+  const s = String((e && (e.errorCode || '')) + ' ' + (e && e.message || e));
+  if(/user_cancelled|user_canceled|AADSTS50126/.test(s)) return '';
+  if(/popup_window_error|empty_window_error|popup.*block/i.test(s)) return '로그인 창(팝업)이 차단됐어요. 주소창 오른쪽의 팝업 차단 아이콘을 눌러 "항상 허용"으로 바꾼 뒤 다시 눌러주세요.';
+  if(/AADSTS90094|AADSTS90095|admin.*(consent|approval)|needs admin/i.test(s)) return '회사 관리자 승인이 필요해요. 전산 담당자에게 "발주현황 대시보드 앱의 Mail.ReadWrite 권한 관리자 동의"를 요청해주세요.';
+  if(/AADSTS65001|consent_required|interaction_required/i.test(s)) return '메일 권한 허용이 필요해요. 다시 눌러서 로그인 창에서 "수락"을 눌러주세요.';
+  if(/AADSTS700016|AADSTS90002|invalid_client|unauthorized_client/i.test(s)) return '앱 등록 정보(클라이언트 ID / 테넌트 ID)가 맞지 않아요. "⚙ 아웃룩 연결"에서 다시 확인해주세요.';
+  if(/AADSTS50011|redirect_uri/i.test(s)) return '앱 등록의 리디렉션 주소가 다릅니다. 다음 주소를 "단일 페이지 애플리케이션(SPA)" 으로 등록해주세요:\n' + msRedirectUri();
+  if(e && (e.status === 401 || e.status === 403)) return '메일 권한이 없어요. 앱 등록 → API 권한에 Microsoft Graph "Mail.ReadWrite"(위임)가 있는지 확인해주세요.';
+  return s.trim().slice(0, 400);
+}
+async function setupOutlook(){
+  const cur = getMsCfg() || {};
+  const cid = prompt('① 아웃룩 연결 — 애플리케이션(클라이언트) ID\n\n마이크로소프트 앱 등록 → 개요 화면에 있는 값을 붙여넣어 주세요.\n(비우고 확인 = 연결 해제)', cur.clientId || '');
+  if(cid === null) return;
+  if(!cid.trim()){
+    if(cur.clientId && confirm('아웃룩 연결을 해제할까요?')){
+      try{ localStorage.removeItem(MS_CFG_KEY); }catch(e){}
+      _msalApp = null; _msalKey = '';
+      toast('아웃룩 연결을 해제했습니다');
+      renderPocResult();
+    }
+    return;
+  }
+  if(!GUID_RE.test(cid.trim())){ alert('클라이언트 ID 형식이 아니에요.\n예: 1a2b3c4d-1234-5678-9abc-1234567890ab'); return; }
+  const tid = prompt('② 디렉터리(테넌트) ID\n\n같은 개요 화면, 클라이언트 ID 바로 아래에 있어요.', cur.tenantId || '');
+  if(tid === null) return;
+  if(!GUID_RE.test(tid.trim())){ alert('테넌트 ID 형식이 아니에요.\n예: 1a2b3c4d-1234-5678-9abc-1234567890ab'); return; }
+  try{ localStorage.setItem(MS_CFG_KEY, JSON.stringify({ clientId:cid.trim(), tenantId:tid.trim() })); }catch(e){}
+  renderPocResult();
+  // 바로 로그인해서 임시보관함에 접근되는지 확인
+  try{
+    toast('마이크로소프트 로그인 창에서 로그인해주세요…', 4000);
+    const token = await getMsToken();
+    const f = await graphCall(token, 'GET', '/me/mailFolders/drafts?$select=displayName,totalItemCount');
+    toast(`✅ 아웃룩 연결 완료 · "${f.displayName}" 폴더 확인됨`, 5000);
+  }catch(e){
+    const t = msErrorText(e);
+    if(t) alert('아웃룩 연결 확인 실패\n\n' + t);
+  }
+}
+
+// 메일 쓰기 버튼 — 아웃룩 연결돼 있으면 PDF 첨부된 메일을 임시보관함에, 아니면 메일 창(mailto)
+let pocMailBusy = false;
+async function draftPocGroups(gis){
+  if(pocMailBusy){ toast('메일 만드는 중입니다… 잠시만 기다려주세요'); return; }
+  pocMailBusy = true;
+  const done = [], failed = [];
+  try{
+    const token = await getMsToken();   // 로그인 창이 필요하면 버튼 누른 직후에 뜨도록 제일 먼저
+    for(let k=0; k<gis.length; k++){
+      const gi = gis[k];
+      const [supName, items] = pocGroupsCache[gi];
+      toast(`📎 ${supName} 발주서 PDF 만드는 중… (${k+1}/${gis.length})`, 60000);
+      try{
+        const m = pocMailParts(supName, items, findSupplierByName(supName));
+        const b64 = await makePocPdfBase64(gi);
+        await createOutlookDraft(token, m, b64);
+        done.push(supName + (m.to ? '' : ' (받는 사람 비어있음)'));
+      }catch(e){
+        failed.push(supName + ' — ' + (msErrorText(e) || '취소됨'));
+        if(e && (e.status === 401 || e.status === 403)) break;
+      }
+    }
+  }catch(e){
+    const t = msErrorText(e);
+    toast('메일을 만들지 못했습니다', 3000);
+    if(t){
+      if(gis.length === 1 && confirm('아웃룩 임시보관함에 메일을 만들지 못했어요.\n\n' + t + '\n\n대신 PDF를 저장하고 메일 창을 열까요? (첨부는 직접)')){
+        pocMailBusy = false;
+        return openPocMailFallback(gis[0]);
+      }
+      if(gis.length > 1) alert('아웃룩 연결 실패\n\n' + t);
+    }
+    return;
+  }finally{
+    pocMailBusy = false;
+  }
+  if(done.length) toast(`✅ 아웃룩 임시보관함에 메일 ${done.length}통을 만들었어요 (PDF 첨부됨) · 아웃룩에서 확인 후 보내기를 눌러주세요`, 7000);
+  if(failed.length) alert('일부 메일을 만들지 못했어요\n\n' + failed.join('\n'));
+  else if(done.some(s=>s.endsWith('(받는 사람 비어있음)'))) alert('이메일이 없는 업체는 받는 사람이 빈 채로 만들어졌어요.\n아웃룩에서 받는 사람을 채워서 보내주세요.\n\n' + done.filter(s=>s.endsWith('(받는 사람 비어있음)')).join('\n'));
+}
+async function openPocMailFallback(gi){
+  const g = pocGroupsCache[gi];
+  if(!g) return;
+  const m = buildPocMail(g[0], g[1], findSupplierByName(g[0]));
+  let saved = '';
+  try{
+    toast('📎 발주서 PDF 만드는 중…', 30000);
+    saved = await downloadPocPdf(gi);
+  }catch(e){ console.warn('PDF 저장 실패', e); }
+  window.location.href = m.url;
+  toast((saved ? `⬇ "${saved}" 저장됨 · 아웃룩 메일 창에 끌어다 놓아 첨부해주세요` : '✉ 메일 창을 열었습니다 · 발주서 PDF를 첨부한 뒤 보내주세요')
+    + (m.shown < m.total ? ` · 본문엔 ${m.shown}건만 적고 "외 ${m.total-m.shown}건" 으로 표시했어요` : ''), 7000);
+}
+function confirmMissingEmail(supName){
+  const supRec = findSupplierByName(supName);
+  if(supRec && supRec.email) return true;
+  return confirm((supRec ? `"${supName}" 거래처에 이메일이 없습니다.` : `"${supName}" 은(는) 거래처 탭에 등록되어 있지 않습니다.`)
+    + '\n\n받는 사람을 비워둔 채 메일을 만들까요?\n(다음부터는 거래처 탭에서 이메일을 넣어두시면 자동으로 채워집니다)');
 }
 function openPocMail(gi){
   const g = pocGroupsCache[gi];
   if(!g){ toast('메일을 쓸 항목이 없습니다'); return; }
-  const [supName, items] = g;
-  const supRec = findSupplierByName(supName);
-  if(!supRec || !supRec.email){
-    const msg = (supRec ? `"${supName}" 거래처에 이메일이 없습니다.` : `"${supName}" 은(는) 거래처 탭에 등록되어 있지 않습니다.`)
-      + '\n\n받는 사람을 비워둔 채 메일 창을 열까요?\n(다음부터는 거래처 탭에서 이메일을 넣어두시면 자동으로 채워집니다)';
-    if(!confirm(msg)) return;
-  }
-  const m = buildPocMail(supName, items, supRec);
-  window.location.href = m.url;
-  toast(m.shown < m.total
-    ? `✉ 메일 창을 열었습니다 · 품목이 많아 본문엔 ${m.shown}건만 적고 "외 ${m.total-m.shown}건" 으로 표시했어요 · PDF 첨부 후 보내주세요`
-    : '✉ 메일 창을 열었습니다 · 발주서 PDF를 첨부한 뒤 보내주세요', 5000);
+  if(!confirmMissingEmail(g[0])) return;
+  if(getMsCfg()) draftPocGroups([gi]);
+  else openPocMailFallback(gi);
 }
 document.getElementById('pocResult').addEventListener('click', e=>{
   const pb = e.target.closest('[data-poc-print]');
   if(pb){ printPocGroup(+pb.dataset.pocPrint); return; }
   const mb = e.target.closest('[data-poc-mail]');
   if(mb){ openPocMail(+mb.dataset.pocMail); return; }
+});
+document.getElementById('pocMsSetup').addEventListener('click', setupOutlook);
+document.getElementById('pocMailAll').addEventListener('click', ()=>{
+  if(!pocGroupsCache.length){ toast('메일을 만들 항목이 없습니다'); return; }
+  if(!getMsCfg()){
+    alert('"전체 업체 메일 만들기"는 아웃룩 연결 후 사용할 수 있어요.\n"⚙ 아웃룩 연결" 버튼을 먼저 눌러주세요.');
+    return;
+  }
+  const names = pocGroupsCache.map(([n])=>n);
+  const noMail = names.filter(n=>{ const s = findSupplierByName(n); return !(s && s.email); });
+  if(!confirm(`${names.length}개 업체의 발주서 메일을 아웃룩 임시보관함에 만들까요? (PDF 첨부)\n\n• ` + names.join('\n• ')
+    + (noMail.length ? `\n\n※ 이메일 미입력 ${noMail.length}곳은 받는 사람이 빈 채로 만들어집니다:\n` + noMail.join(', ') : ''))) return;
+  draftPocGroups(pocGroupsCache.map((_, i)=>i));
 });
 
 function renderPocResult(){
@@ -4103,6 +4362,8 @@ function renderPocResult(){
 
   // 업체별 PDF/메일 버튼에서 쓰기 위해 묶음 정보를 보관
   pocGroupsCache = Object.entries(groups);
+  const msOn = !!getMsCfg();
+  document.getElementById('pocMsSetup').textContent = msOn ? '✅ 아웃룩 연결됨' : '⚙ 아웃룩 연결';
 
   // 화면 표시용 (한글)
   resultEl.innerHTML = Object.entries(groups).map(([supName, items], gi)=>{
@@ -4144,7 +4405,7 @@ function renderPocResult(){
       <div class="poc-group-head"><span>${supName} <span class="sub">${items.length}건${hasDom?' · 총 매입가 '+fmtKrw(domTotal)+' (부가세 별도)':''}</span></span>
         <span class="poc-head-right no-print">${mailTo}
           <button type="button" class="poc-act" data-poc-print="${gi}">🖨 이 업체 PDF</button>
-          <button type="button" class="poc-act mail" data-poc-mail="${gi}">✉ 메일 쓰기</button>
+          <button type="button" class="poc-act mail" data-poc-mail="${gi}" title="${msOn ? 'PDF가 첨부된 메일을 아웃룩 임시보관함에 만들어요' : 'PDF를 저장하고 아웃룩 메일 창을 열어요 (첨부는 끌어다 놓기)'}">${msOn ? '📎 메일+PDF 만들기' : '✉ 메일 쓰기'}</button>
         </span></div>
       <table class="poc-table"><colgroup>${cols}</colgroup><thead>${head}</thead><tbody>${rows}</tbody>${footer}</table>
     </div>`;
