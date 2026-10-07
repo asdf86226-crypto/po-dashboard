@@ -4030,7 +4030,8 @@ function pocMailParts(supName, items, supRec){
     const sender = COMPANY_PROFILES[pocDomCompanyKey()].name;
     const t = pocDomTotals(items);
     subject = `[${sender}] 발주서 송부 - ${today}`;
-    head = `안녕하세요${contact ? ', ' + contact + ' 님' : ''}.\n${sender}입니다.\n\n아래 품목 발주드리오니 첨부한 발주서 확인 부탁드립니다.\n\n`;
+    const senderShort = pocDomCompanyKey() === 'taesung_ko' ? '태성정밀' : '플로우텍';
+    head = `안녕하세요. 대표님.\n${senderShort} 오정민 입니다.\n업무에 노고가 많으십니다.\n\n아래 품목 발주드리오니 첨부한 발주서 확인 부탁드립니다.\n\n`;
     lineOf = (p,i)=>{
       const a = p._isDom ? pocDomLineAmount(p) : 0;
       return `${i+1}. ${p.itemCode||'-'} / ${p.itemName||'-'} / 수량 ${fmtQty(p.qty)}`
@@ -4039,7 +4040,7 @@ function pocMailParts(supName, items, supRec){
     };
     moreOf = n=> `... 외 ${n}건 (첨부 발주서 참고)`;
     foot = (t.supply > 0 ? `\n\n공급가액 : ${fmtKrw(t.supply)}\n부가세(10%) : ${fmtKrw(t.vat)}\n합계 : ${fmtKrw(t.total)} (부가세 포함)` : '')
-      + `\n\n확인 후 납기 회신 부탁드립니다.\n감사합니다.\n\n${sender} 드림`;
+      + `\n\n확인 후 납기에 맞게 입고 부탁드립니다.\n감사합니다.`;
     fileName = `발주서_${pocFileSafe(supName)}_${today}.pdf`;
   }
   return {
