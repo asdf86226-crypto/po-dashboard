@@ -163,6 +163,16 @@
     display:flex; justify-content:space-between; align-items:center;
   }
   .poc-group-head .sub{font-size:11.5px; font-weight:600; color:#c8cfdc;}
+  .poc-group-head .poc-head-right{display:flex; align-items:center; gap:10px; flex-wrap:wrap; justify-content:flex-end;}
+  .poc-group-head .poc-act{
+    font:inherit; font-size:12px; font-weight:700; padding:5px 10px; border-radius:6px; cursor:pointer;
+    border:1px solid rgba(255,255,255,.35); background:rgba(255,255,255,.08); color:#f3efe4; white-space:nowrap;
+  }
+  .poc-group-head .poc-act:hover{background:rgba(255,255,255,.2);}
+  .poc-group-head .poc-act.mail{background:#0f6cbd; border-color:#0f6cbd; color:#fff;}
+  .poc-group-head .poc-act.mail:hover{background:#115ea3;}
+  .poc-group-head .poc-mail-to{font-size:11px; font-weight:600; color:#c8cfdc;}
+  .poc-group-head .poc-mail-to.none{color:#fbbf24;}
   .poc-table{width:100%; border-collapse:collapse; table-layout:fixed;}
   .poc-table th{background:#eef2f4; color:var(--ink-soft); font-size:11.5px; font-weight:700; text-align:left; padding:8px 12px; border-bottom:1px solid var(--line);}
   .poc-table td{padding:9px 12px; border-bottom:1px solid var(--line); font-size:13px;}
@@ -188,6 +198,9 @@
     #pocResult{display:none !important;}
     .poc-print-only{display:block !important;}
     .no-print{display:none !important;}
+    /* 업체 하나만 인쇄/PDF 할 때 — 나머지 업체 묶음은 숨김 */
+    body.poc-print-one #pocResultPrint .poc-group:not(.poc-print-target){display:none !important;}
+    body.poc-print-one #pocResultPrint .poc-print-target{break-before:auto !important;}
     .appr-line-table th{background:#eee !important; -webkit-print-color-adjust:exact; print-color-adjust:exact;}
   }
 
@@ -1205,6 +1218,10 @@
         <div class="frow">
           <div class="fgroup"><label>담당자명</label><input type="text" name="contact"></div>
           <div class="fgroup"><label>연락처(Wechat ID)</label><input type="text" name="wechat"></div>
+        </div>
+        <div class="frow">
+          <div class="fgroup"><label>이메일 <span style="font-weight:400; color:var(--ink-soft); text-transform:none; font-size:11px;">(발주서 메일 받는 사람)</span></label><input type="text" name="email" placeholder="예: sales@abc.com"></div>
+          <div class="fgroup"><label>참조(CC) <span style="font-weight:400; color:var(--ink-soft); text-transform:none; font-size:11px;">(여러 개면 ; 로 구분)</span></label><input type="text" name="emailCc" placeholder="비워도 됨"></div>
         </div>
         <div class="frow">
           <div class="fgroup"><label>위치</label><input type="text" name="location"></div>
@@ -2841,6 +2858,7 @@ function renderSuppliers(){
       <h3>${s.name} <span class="item-badge" style="background:${s.type==='domestic'?'#2563eb':'#0d9488'};">${s.type==='domestic'?'국내':'해외'}</span> <span style="font-size:11px; color:var(--console-accent); font-weight:600;">✎ 수정</span></h3>
       <div class="loc">${s.location||''}</div>
       <div class="row"><b>담당</b>${s.contact||'-'} ${s.wechat? '· '+s.wechat:''}</div>
+      <div class="row"><b>메일</b>${s.email ? escHtmlPoc(s.email) : '<span style="color:var(--ink-soft)">미입력</span>'}</div>
       <div class="row"><b>품목</b>${s.items||'-'}</div>
       <div class="row"><b>결제</b>${s.payMethod||'-'} ${s.payTerms? '/ '+s.payTerms:''}</div>
       ${s.note? `<div class="note">${s.note}</div>` : ''}
@@ -3932,6 +3950,119 @@ function pocLetterheadHtml(profileKey, todayStr){
   </div>`;
 }
 
+// ─── 업체별 발주서 PDF / 아웃룩 메일 ───────────────────────────
+var pocGroupsCache = [];   // [[업체명, 아이템목록], ...] — renderPocResult 에서 채움
+function escHtmlPoc(s){
+  return String(s ?? '').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+function findSupplierByName(name){
+  const n = String(name||'').trim().toLowerCase();
+  if(!n) return null;
+  return suppliers.find(s=> String(s.name||'').trim().toLowerCase() === n) || null;
+}
+// 메일 주소 칸에 쉼표/세미콜론/공백으로 여러 개 적어도 되게 정리 (아웃룩은 ; 구분)
+function normEmails(s){
+  return String(s||'').split(/[;,\s]+/).map(x=>x.trim()).filter(Boolean).join(';');
+}
+function pocFileSafe(s){
+  return String(s||'').replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim();
+}
+// 업체 하나만 인쇄/PDF — 인쇄 창의 파일 이름도 "발주서_업체명_날짜" 로 맞춰줌
+function printPocGroup(gi){
+  const g = pocGroupsCache[gi];
+  const target = document.querySelector(`#pocResultPrint .poc-group[data-poc-gi="${gi}"]`);
+  if(!g || !target){ toast('인쇄할 항목이 없습니다'); return; }
+  const [supName, items] = g;
+  const isEn = !items.some(p=>p._isDom);
+  const today = isoDate(new Date());
+  const prevTitle = document.title;
+  const metaEl = document.getElementById('pocDocMeta');
+  const prevMeta = metaEl.textContent;
+  document.title = (isEn ? 'PO_' : '발주서_') + pocFileSafe(supName) + '_' + today;
+  metaEl.textContent = metaEl.textContent.replace(/^Supplier: [^|]*/, 'Supplier: ' + supName + '  ');
+  document.body.classList.add('poc-print-one');
+  target.classList.add('poc-print-target');
+  let restored = false;
+  const restore = ()=>{
+    if(restored) return; restored = true;
+    document.body.classList.remove('poc-print-one');
+    target.classList.remove('poc-print-target');
+    document.title = prevTitle;
+    metaEl.textContent = prevMeta;
+    window.removeEventListener('afterprint', restore);
+  };
+  window.addEventListener('afterprint', restore);
+  window.print();
+  setTimeout(restore, 1000); // afterprint 를 안 쏘는 브라우저 대비
+}
+// 메일 본문 — 국내는 한글, 해외는 영문. 주소창 길이 제한이 있어 품목이 많으면 "외 N건" 으로 줄임.
+function buildPocMail(supName, items, supRec){
+  const isEn = !items.some(p=>p._isDom);
+  const today = isoDate(new Date());
+  const contact = (supRec && supRec.contact) ? supRec.contact.trim() : '';
+  let subject, head, foot, lineOf, moreOf;
+  if(isEn){
+    const sender = COMPANY_PROFILES.flowtech_en.name;
+    subject = `[${sender}] Purchase Order - ${today}`;
+    head = `Dear ${contact || supName},\n\nPlease find attached our Purchase Order (${today}).\n\n`;
+    lineOf = (p,i)=> `${i+1}. ${p.itemCode||'-'} / ${p.itemName||'-'} / Qty ${fmtQty(p.qty)}${p.dueDate ? ' / Requested delivery ' + p.dueDate : ''}`;
+    moreOf = n=> `... and ${n} more item${n>1?'s':''} (see attached PO)`;
+    foot = `\n\nKindly confirm receipt and let us know the delivery schedule.\n\nBest regards,\n${sender}`;
+  } else {
+    const sender = COMPANY_PROFILES[pocDomCompanyKey()].name;
+    const total = items.filter(p=>p._isDom).reduce((s,p)=>{
+      const unit = parseFloat(p.unitPrice)||0, qty = parseFloat(p.qty)||0;
+      return s + (unit>0 && qty>0 ? unit*qty : (parseFloat(p.poAmount)||0));
+    }, 0);
+    subject = `[${sender}] 발주서 송부 - ${today}`;
+    head = `안녕하세요${contact ? ', ' + contact + ' 님' : ''}.\n${sender}입니다.\n\n아래 품목 발주드리오니 첨부한 발주서 확인 부탁드립니다.\n\n`;
+    lineOf = (p,i)=> `${i+1}. ${p.itemCode||'-'} / ${p.itemName||'-'} / 수량 ${fmtQty(p.qty)}${p.dueDate ? ' / 납기요청 ' + p.dueDate : ''}`;
+    moreOf = n=> `... 외 ${n}건 (첨부 발주서 참고)`;
+    foot = (total > 0 ? `\n\n총 매입가 : ${fmtKrw(total)} (부가세 별도)` : '')
+      + `\n\n확인 후 납기 회신 부탁드립니다.\n감사합니다.\n\n${sender} 드림`;
+  }
+  const to = normEmails(supRec && supRec.email);
+  const cc = normEmails(supRec && supRec.emailCc);
+  const makeUrl = lines=>{
+    const qs = [];
+    if(cc) qs.push('cc=' + encodeURIComponent(cc));
+    qs.push('subject=' + encodeURIComponent(subject));
+    qs.push('body=' + encodeURIComponent(head + lines.join('\n') + foot));
+    return 'mailto:' + to.split(';').map(x=>encodeURIComponent(x).replace(/%40/g,'@')).join(';') + '?' + qs.join('&');
+  };
+  const all = items.map(lineOf);
+  const LIMIT = 1900; // 윈도우/아웃룩 주소 길이 한도(약 2000자) 안쪽
+  let n = all.length;
+  let url = makeUrl(all);
+  while(url.length > LIMIT && n > 1){
+    n--;
+    url = makeUrl(all.slice(0, n).concat(moreOf(all.length - n)));
+  }
+  return { url, to, subject, shown: n, total: all.length };
+}
+function openPocMail(gi){
+  const g = pocGroupsCache[gi];
+  if(!g){ toast('메일을 쓸 항목이 없습니다'); return; }
+  const [supName, items] = g;
+  const supRec = findSupplierByName(supName);
+  if(!supRec || !supRec.email){
+    const msg = (supRec ? `"${supName}" 거래처에 이메일이 없습니다.` : `"${supName}" 은(는) 거래처 탭에 등록되어 있지 않습니다.`)
+      + '\n\n받는 사람을 비워둔 채 메일 창을 열까요?\n(다음부터는 거래처 탭에서 이메일을 넣어두시면 자동으로 채워집니다)';
+    if(!confirm(msg)) return;
+  }
+  const m = buildPocMail(supName, items, supRec);
+  window.location.href = m.url;
+  toast(m.shown < m.total
+    ? `✉ 메일 창을 열었습니다 · 품목이 많아 본문엔 ${m.shown}건만 적고 "외 ${m.total-m.shown}건" 으로 표시했어요 · PDF 첨부 후 보내주세요`
+    : '✉ 메일 창을 열었습니다 · 발주서 PDF를 첨부한 뒤 보내주세요', 5000);
+}
+document.getElementById('pocResult').addEventListener('click', e=>{
+  const pb = e.target.closest('[data-poc-print]');
+  if(pb){ printPocGroup(+pb.dataset.pocPrint); return; }
+  const mb = e.target.closest('[data-poc-mail]');
+  if(mb){ openPocMail(+mb.dataset.pocMail); return; }
+});
+
 function renderPocResult(){
   const list = getPocList();
   const supplier = document.getElementById('pocSupplier').value;
@@ -3949,6 +4080,7 @@ function renderPocResult(){
   if(list.length === 0){
     resultEl.innerHTML = `<div class="poc-empty">조건에 맞는 "요청등록" 단계 건이 없습니다.<br>구매요청을 먼저 해외발주건 또는 국내발주건에 등록해주세요.</div>`;
     printEl.innerHTML = '';
+    pocGroupsCache = [];
     return;
   }
 
@@ -3969,8 +4101,11 @@ function renderPocResult(){
     return parseFloat(p.poAmount)||0;
   }
 
+  // 업체별 PDF/메일 버튼에서 쓰기 위해 묶음 정보를 보관
+  pocGroupsCache = Object.entries(groups);
+
   // 화면 표시용 (한글)
-  resultEl.innerHTML = Object.entries(groups).map(([supName, items])=>{
+  resultEl.innerHTML = Object.entries(groups).map(([supName, items], gi)=>{
     const hasDom = items.some(p=>p._isDom);
     const domTotal = hasDom ? items.filter(p=>p._isDom).reduce((s,p)=> s + domLineAmount(p), 0) : 0;
     const cols = hasDom
@@ -4001,8 +4136,16 @@ function renderPocResult(){
       ? `<tfoot><tr><td colspan="5" style="text-align:right; font-weight:700; background:#f7f9f8;">국내 총 매입가 <span style="font-weight:600; color:var(--ink-soft); font-size:11px;">(부가세 별도)</span></td>
            <td style="text-align:right; font-weight:800; background:#f7f9f8; font-family:var(--sans); color:var(--console-accent);">${fmtKrw(domTotal)}</td>
            <td colspan="2" style="background:#f7f9f8;"></td></tr></tfoot>` : '';
+    const supRec = findSupplierByName(supName);
+    const mailTo = supRec && supRec.email
+      ? `<span class="poc-mail-to">✉ ${escHtmlPoc(supRec.email)}</span>`
+      : `<span class="poc-mail-to none">이메일 미입력</span>`;
     return `<div class="poc-group">
-      <div class="poc-group-head"><span>${supName}</span><span class="sub">${items.length}건${hasDom?' · 총 매입가 '+fmtKrw(domTotal)+' (부가세 별도)':''}</span></div>
+      <div class="poc-group-head"><span>${supName} <span class="sub">${items.length}건${hasDom?' · 총 매입가 '+fmtKrw(domTotal)+' (부가세 별도)':''}</span></span>
+        <span class="poc-head-right no-print">${mailTo}
+          <button type="button" class="poc-act" data-poc-print="${gi}">🖨 이 업체 PDF</button>
+          <button type="button" class="poc-act mail" data-poc-mail="${gi}">✉ 메일 쓰기</button>
+        </span></div>
       <table class="poc-table"><colgroup>${cols}</colgroup><thead>${head}</thead><tbody>${rows}</tbody>${footer}</table>
     </div>`;
   }).join('');
@@ -4012,7 +4155,7 @@ function renderPocResult(){
   //  · 국내 아이템 그룹 → 사용자가 선택한 한글 회사 (플로우텍 or 태성정밀)
   //  · 해외 아이템 그룹 → FLOWTECH 영문 레터헤드 고정
   const domKey = pocDomCompanyKey();
-  printEl.innerHTML = Object.entries(groups).map(([supName, items])=>{
+  printEl.innerHTML = Object.entries(groups).map(([supName, items], gi)=>{
     const hasDom = items.some(p=>p._isDom);
     const domTotal = hasDom ? items.filter(p=>p._isDom).reduce((s,p)=> s + domLineAmount(p), 0) : 0;
     const letterhead = pocLetterheadHtml(hasDom ? domKey : 'flowtech_en', todayStr);
@@ -4051,7 +4194,7 @@ function renderPocResult(){
     const supHead = hasDom
       ? `<span>수신 : ${supName === '공급사 미지정' ? '공급사 미지정' : supName} 귀하</span><span class="sub">${items.length}건${hasDom?' · 총 매입가 '+fmtKrw(domTotal)+' (부가세 별도)':''}</span>`
       : `<span>To : ${supName === '공급사 미지정' ? 'Supplier unassigned' : supName}</span><span class="sub">${items.length} item${items.length>1?'s':''}</span>`;
-    return `<div class="poc-group">
+    return `<div class="poc-group" data-poc-gi="${gi}">
       ${letterhead}
       <div class="poc-group-head">${supHead}</div>
       <table class="poc-table"><colgroup>${cols}</colgroup><thead>${head}</thead><tbody>${rows}</tbody>${footer}</table>
