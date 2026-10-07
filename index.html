@@ -187,6 +187,7 @@
   .poc-pdf-stage .poc-table td{padding:7px 6px; font-size:11px; color:#111; white-space:normal; word-break:keep-all; overflow-wrap:break-word; vertical-align:middle;}
   .poc-pdf-stage .poc-table td:first-child, .poc-pdf-stage .poc-table th:first-child{padding-left:10px;}
   .poc-pdf-stage .item-badge{font-size:9px; padding:1px 4px;}
+  .poc-pdf-stage .poc-table td[style*="text-align:right"], .poc-pdf-stage .poc-table td:first-child{white-space:nowrap; font-size:10.5px;}
   .poc-table{width:100%; border-collapse:collapse; table-layout:fixed;}
   .poc-table th{background:#eef2f4; color:var(--ink-soft); font-size:11.5px; font-weight:700; text-align:left; padding:8px 12px; border-bottom:1px solid var(--line);}
   .poc-table td{padding:9px 12px; border-bottom:1px solid var(--line); font-size:13px;}
@@ -4027,15 +4028,17 @@ function pocMailParts(supName, items, supRec){
     fileName = `PO_${pocFileSafe(supName)}_${today}.pdf`;
   } else {
     const sender = COMPANY_PROFILES[pocDomCompanyKey()].name;
-    const total = items.filter(p=>p._isDom).reduce((s,p)=>{
-      const unit = parseFloat(p.unitPrice)||0, qty = parseFloat(p.qty)||0;
-      return s + (unit>0 && qty>0 ? unit*qty : (parseFloat(p.poAmount)||0));
-    }, 0);
+    const t = pocDomTotals(items);
     subject = `[${sender}] 발주서 송부 - ${today}`;
     head = `안녕하세요${contact ? ', ' + contact + ' 님' : ''}.\n${sender}입니다.\n\n아래 품목 발주드리오니 첨부한 발주서 확인 부탁드립니다.\n\n`;
-    lineOf = (p,i)=> `${i+1}. ${p.itemCode||'-'} / ${p.itemName||'-'} / 수량 ${fmtQty(p.qty)}${p.dueDate ? ' / 납기요청 ' + p.dueDate : ''}`;
+    lineOf = (p,i)=>{
+      const a = p._isDom ? pocDomLineAmount(p) : 0;
+      return `${i+1}. ${p.itemCode||'-'} / ${p.itemName||'-'} / 수량 ${fmtQty(p.qty)}`
+        + (a > 0 ? ` / 공급가액 ${fmtKrw(a)} + 부가세 ${fmtKrw(domVat(a))} = ${fmtKrw(a + domVat(a))}` : '')
+        + (p.dueDate ? ' / 납기요청 ' + p.dueDate : '');
+    };
     moreOf = n=> `... 외 ${n}건 (첨부 발주서 참고)`;
-    foot = (total > 0 ? `\n\n공급가액 : ${fmtKrw(total)}\n부가세(10%) : ${fmtKrw(domVat(total))}\n합계 : ${fmtKrw(total + domVat(total))} (부가세 포함)` : '')
+    foot = (t.supply > 0 ? `\n\n공급가액 : ${fmtKrw(t.supply)}\n부가세(10%) : ${fmtKrw(t.vat)}\n합계 : ${fmtKrw(t.total)} (부가세 포함)` : '')
       + `\n\n확인 후 납기 회신 부탁드립니다.\n감사합니다.\n\n${sender} 드림`;
     fileName = `발주서_${pocFileSafe(supName)}_${today}.pdf`;
   }
@@ -4090,9 +4093,9 @@ async function makePocPdf(gi, quality){
   const stage = document.createElement('div');
   stage.className = 'poc-pdf-stage';
   stage.appendChild(src.cloneNode(true));
-  // A4 폭에 맞게 칸 너비 조정 (국내 8칸: 단가·매입가 포함)
+  // A4 폭에 맞게 칸 너비 조정 (국내 10칸: 단가·공급가액·부가세·합계 포함)
   const cols = stage.querySelectorAll('colgroup col');
-  const widths = cols.length === 8 ? [11,13,23,7,10,12,11,13] : cols.length === 6 ? [12,14,28,8,14,24] : null;
+  const widths = cols.length === 10 ? [10,10,18,6,8,11,9,11,10,7] : cols.length === 6 ? [12,14,28,8,14,24] : null;
   if(widths) cols.forEach((c, i)=>{ c.style.width = widths[i] + '%'; });
   const q = quality || {scale:2, jpeg:0.92};
   return html2pdf().set({
@@ -4322,15 +4325,43 @@ document.getElementById('pocMailAll').addEventListener('click', ()=>{
   draftPocGroups(pocGroupsCache.map((_, i)=>i));
 });
 
-// 국내 발주서 아래 합계 3줄: 공급가액 / 부가세(10%) / 합계(부가세 포함)
-function pocVatFootRows(supply, screen){
-  const vat = domVat(supply);
-  const lbl = 'text-align:right; font-weight:700; background:#f7f9f8;';
-  const num = 'text-align:right; background:#f7f9f8; font-family:var(--sans);';
-  const row = (label, amount, strong) => `<tr><td colspan="5" style="${lbl}">${label}</td>
-    <td style="${num} font-weight:${strong?800:700};${strong && screen ? ' color:var(--console-accent);' : ''}">${fmtKrw(amount)}</td>
-    <td colspan="2" style="background:#f7f9f8;"></td></tr>`;
-  return row('공급가액', supply, false) + row('부가세 (10%)', vat, false) + row('합계 <span style="font-weight:600; font-size:11px;">(부가세 포함)</span>', supply + vat, true);
+// 국내 발주서 — 각 건마다 공급가액 · 부가세(10%) · 합계를 붙이고, 맨 아래 한 줄로 총합계
+// 한 건의 공급가액은 (단가 있으면) 단가×수량, 아니면 저장된 발주금액(poAmount)
+function pocDomLineAmount(p){
+  const unit = parseFloat(p.unitPrice)||0;
+  const qty = parseFloat(p.qty)||0;
+  if(unit>0 && qty>0) return unit*qty;
+  return parseFloat(p.poAmount)||0;
+}
+// 묶음 안 국내 건들의 합계 (부가세는 건별 부가세를 더한 값)
+function pocDomTotals(items){
+  let supply = 0, vat = 0;
+  items.filter(p=>p._isDom).forEach(p=>{ const a = pocDomLineAmount(p); supply += a; vat += domVat(a); });
+  return { supply, vat, total: supply + vat };
+}
+const POC_DOM_COLS = '<col style="width:8%"><col style="width:10%"><col style="width:17%"><col style="width:6%"><col style="width:9%"><col style="width:10%"><col style="width:9%"><col style="width:10%"><col style="width:9%"><col style="width:12%">';
+function pocDomHead(noteLabel){
+  return '<tr><th>요청일</th><th>품목코드</th><th>품명</th><th>수량</th>'
+    + '<th style="text-align:right;">단가</th><th style="text-align:right;">공급가액</th><th style="text-align:right;">부가세</th><th style="text-align:right;">합계</th>'
+    + '<th>납기요청일</th><th>' + noteLabel + '</th></tr>';
+}
+function pocDomPriceCells(p){
+  const num = 'text-align:right; font-family:var(--sans);';
+  if(!p._isDom) return `<td style="${num}">-</td>`.repeat(4);
+  const a = pocDomLineAmount(p), v = domVat(a);
+  return `<td style="${num}">${p.unitPrice ? fmtKrw(parseFloat(p.unitPrice)) : '-'}</td>`
+    + `<td style="${num}">${fmtKrw(a)}</td>`
+    + `<td style="${num}">${fmtKrw(v)}</td>`
+    + `<td style="${num} font-weight:700;">${fmtKrw(a + v)}</td>`;
+}
+function pocDomFootRow(t, screen){
+  const bg = 'background:#f7f9f8;';
+  const num = `text-align:right; font-family:var(--sans); font-weight:700; ${bg}`;
+  return `<tr><td colspan="5" style="text-align:right; font-weight:700; ${bg}">합계</td>
+    <td style="${num}">${fmtKrw(t.supply)}</td>
+    <td style="${num}">${fmtKrw(t.vat)}</td>
+    <td style="${num} font-weight:800;${screen ? ' color:var(--console-accent);' : ''}">${fmtKrw(t.total)}</td>
+    <td colspan="2" style="${bg}"></td></tr>`;
 }
 
 function renderPocResult(){
@@ -4362,14 +4393,7 @@ function renderPocResult(){
     groups[key].push(p);
   });
 
-  // 국내발주 아이템은 단가·금액 컬럼을 함께 보여주기 위해, 그룹 안에 국내가 하나라도 있으면 그 두 컬럼을 추가한다.
-  // 한 아이템의 매입가는 (단가 있으면) 단가×수량, 아니면 저장된 발주금액(poAmount)을 사용.
-  function domLineAmount(p){
-    const unit = parseFloat(p.unitPrice)||0;
-    const qty = parseFloat(p.qty)||0;
-    if(unit>0 && qty>0) return unit*qty;
-    return parseFloat(p.poAmount)||0;
-  }
+  // 국내발주 아이템이 하나라도 있는 묶음은 단가·공급가액·부가세·합계 칸을 함께 보여준다
 
   // 업체별 PDF/메일 버튼에서 쓰기 위해 묶음 정보를 보관
   pocGroupsCache = Object.entries(groups);
@@ -4379,21 +4403,16 @@ function renderPocResult(){
   // 화면 표시용 (한글)
   resultEl.innerHTML = Object.entries(groups).map(([supName, items], gi)=>{
     const hasDom = items.some(p=>p._isDom);
-    const domTotal = hasDom ? items.filter(p=>p._isDom).reduce((s,p)=> s + domLineAmount(p), 0) : 0;
+    const domT = pocDomTotals(items);
     const cols = hasDom
-      ? '<col style="width:9%"><col style="width:11%"><col style="width:22%"><col style="width:6%"><col style="width:11%"><col style="width:12%"><col style="width:11%"><col style="width:18%">'
+      ? POC_DOM_COLS
       : '<col style="width:11%"><col style="width:13%"><col style="width:24%"><col style="width:8%"><col style="width:13%"><col style="width:31%">';
     const head = hasDom
-      ? '<tr><th>요청일</th><th>품목코드</th><th>품명</th><th>수량</th><th style="text-align:right;">단가(KRW)</th><th style="text-align:right;">공급가액(KRW)</th><th>납기요청일</th><th>특이사항</th></tr>'
+      ? pocDomHead('특이사항')
       : '<tr><th>요청일</th><th>품목코드</th><th>품명</th><th>수량</th><th>납기요청일</th><th>특이사항</th></tr>';
     const rows = items.map(p=>{
       const badges = (p.isFirstBatch?'<span class="item-badge">초도</span>':'')+(p.isSample?'<span class="item-badge sample">샘플</span>':'')+(p.isUrgent?'<span class="item-badge urgent">긴급</span>':'');
-      const priceCells = hasDom
-        ? (p._isDom
-            ? `<td style="text-align:right; font-family:var(--sans);">${p.unitPrice ? fmtKrw(parseFloat(p.unitPrice)) : '<span style="color:var(--ink-soft)">-</span>'}</td>`
-              + `<td style="text-align:right; font-family:var(--sans); font-weight:700;">${fmtKrw(domLineAmount(p))}</td>`
-            : `<td style="text-align:right; color:var(--ink-soft);">-</td><td style="text-align:right; color:var(--ink-soft);">-</td>`)
-        : '';
+      const priceCells = hasDom ? pocDomPriceCells(p) : '';
       return `<tr>
         <td>${todayStr}</td>
         <td>${p.itemCode||'-'}</td>
@@ -4405,13 +4424,13 @@ function renderPocResult(){
       </tr>`;
     }).join('');
     const footer = hasDom
-      ? `<tfoot>${pocVatFootRows(domTotal, true)}</tfoot>` : '';
+      ? `<tfoot>${pocDomFootRow(domT, true)}</tfoot>` : '';
     const supRec = findSupplierByName(supName);
     const mailTo = supRec && supRec.email
       ? `<span class="poc-mail-to">✉ ${escHtmlPoc(supRec.email)}</span>`
       : `<span class="poc-mail-to none">이메일 미입력</span>`;
     return `<div class="poc-group">
-      <div class="poc-group-head"><span>${supName} <span class="sub">${items.length}건${hasDom?' · 합계 '+fmtKrw(domTotal + domVat(domTotal))+' (부가세 포함)':''}</span></span>
+      <div class="poc-group-head"><span>${supName} <span class="sub">${items.length}건${hasDom?' · 합계 '+fmtKrw(domT.total)+' (부가세 포함)':''}</span></span>
         <span class="poc-head-right no-print">${mailTo}
           <button type="button" class="poc-act" data-poc-print="${gi}">🖨 이 업체 PDF</button>
           <button type="button" class="poc-act mail" data-poc-mail="${gi}" title="${msOn ? 'PDF가 첨부된 메일을 아웃룩 임시보관함에 만들어요' : 'PDF를 저장하고 아웃룩 메일 창을 열어요 (첨부는 끌어다 놓기)'}">${msOn ? '📎 메일+PDF 만들기' : '✉ 메일 쓰기'}</button>
@@ -4427,25 +4446,20 @@ function renderPocResult(){
   const domKey = pocDomCompanyKey();
   printEl.innerHTML = Object.entries(groups).map(([supName, items], gi)=>{
     const hasDom = items.some(p=>p._isDom);
-    const domTotal = hasDom ? items.filter(p=>p._isDom).reduce((s,p)=> s + domLineAmount(p), 0) : 0;
+    const domT = pocDomTotals(items);
     const letterhead = pocLetterheadHtml(hasDom ? domKey : 'flowtech_en', todayStr);
     const cols = hasDom
-      ? '<col style="width:9%"><col style="width:11%"><col style="width:22%"><col style="width:6%"><col style="width:11%"><col style="width:12%"><col style="width:11%"><col style="width:18%">'
+      ? POC_DOM_COLS
       : '<col style="width:11%"><col style="width:13%"><col style="width:24%"><col style="width:8%"><col style="width:13%"><col style="width:31%">';
     const head = hasDom
-      ? '<tr><th>요청일</th><th>품목코드</th><th>품명</th><th>수량</th><th style="text-align:right;">단가(KRW)</th><th style="text-align:right;">공급가액(KRW)</th><th>납기요청일</th><th>비고</th></tr>'
+      ? pocDomHead('비고')
       : '<tr><th>Date</th><th>Item Code</th><th>Item Name</th><th>Qty</th><th>Requested Delivery</th><th>Remarks</th></tr>';
     const rows = items.map(p=>{
       // 국내 그룹은 한글, 해외 그룹은 영문 배지
       const badges = hasDom
         ? (p.isFirstBatch?'<span class="item-badge">초도</span>':'')+(p.isSample?'<span class="item-badge sample">샘플</span>':'')+(p.isUrgent?'<span class="item-badge urgent">긴급</span>':'')
         : (p.isFirstBatch?'<span class="item-badge">First Batch</span>':'')+(p.isSample?'<span class="item-badge sample">Sample</span>':'')+(p.isUrgent?'<span class="item-badge urgent">Urgent</span>':'');
-      const priceCells = hasDom
-        ? (p._isDom
-            ? `<td style="text-align:right; font-family:var(--sans);">${p.unitPrice ? fmtKrw(parseFloat(p.unitPrice)) : '-'}</td>`
-              + `<td style="text-align:right; font-family:var(--sans); font-weight:700;">${fmtKrw(domLineAmount(p))}</td>`
-            : `<td style="text-align:right;">-</td><td style="text-align:right;">-</td>`)
-        : '';
+      const priceCells = hasDom ? pocDomPriceCells(p) : '';
       return `<tr>
         <td>${todayStr}</td>
         <td>${p.itemCode||'-'}</td>
@@ -4457,10 +4471,10 @@ function renderPocResult(){
       </tr>`;
     }).join('');
     const footer = hasDom
-      ? `<tfoot>${pocVatFootRows(domTotal, false)}</tfoot>` : '';
+      ? `<tfoot>${pocDomFootRow(domT, false)}</tfoot>` : '';
     // 헤더 문구: 국내는 한글 "수신: <업체>", 해외는 영문 "To: <업체>"
     const supHead = hasDom
-      ? `<span>수신 : ${supName === '공급사 미지정' ? '공급사 미지정' : supName} 귀하</span><span class="sub">${items.length}건${hasDom?' · 합계 '+fmtKrw(domTotal + domVat(domTotal))+' (부가세 포함)':''}</span>`
+      ? `<span>수신 : ${supName === '공급사 미지정' ? '공급사 미지정' : supName} 귀하</span><span class="sub">${items.length}건${hasDom?' · 합계 '+fmtKrw(domT.total)+' (부가세 포함)':''}</span>`
       : `<span>To : ${supName === '공급사 미지정' ? 'Supplier unassigned' : supName}</span><span class="sub">${items.length} item${items.length>1?'s':''}</span>`;
     return `<div class="poc-group" data-poc-gi="${gi}">
       ${letterhead}
@@ -4961,9 +4975,8 @@ function buildApprItemTable(items, opts){
       else if(i.currency==='CNY') subCny += parseFloat(i.amount)||0;
       else subKrw += parseFloat(i.amount)||0;
       subKrwEquiv += i.currency==='KRW' ? (parseFloat(i.amount)||0) : toKrwCur(i.amount, i.currency);   // 원화는 환율 곱하지 않음
-      if(i.source==='domestic') subDomSupply += parseFloat(i.amount)||0;
+      if(i.source==='domestic'){ subDomSupply += parseFloat(i.amount)||0; subVat += domVat(i.amount); }
     });
-    subVat = domVat(subDomSupply);
     subKrw += subVat; subKrwEquiv += subVat;
     grandUsd += subUsd; grandKrw += subKrw; grandCny += subCny; grandKrwEquiv += subKrwEquiv;
     grandDomSupply += subDomSupply; grandVat += subVat;
@@ -5118,13 +5131,13 @@ function exportApprovalXlsx(items){
   const tables = order.map(sup=>{
     const rows = groups[sup];
     const unit = unitOf((rows[0]||{}).currency);
-    let qtyTotal = 0, amtTotal = 0, domSupply = 0;
+    let qtyTotal = 0, amtTotal = 0, domSupply = 0, domVatSum = 0;
     const bodyRows = rows.map((it, i)=>{
       const qty = parseFloat(it.qty)||0;
       const amt = parseFloat(it.amount)||0;
       const unitPrice = qty>0 ? amt/qty : amt;
       qtyTotal += qty; amtTotal += amt;
-      if(it.source==='domestic') domSupply += amt;
+      if(it.source==='domestic'){ domSupply += amt; domVatSum += domVat(amt); }
       return `<tr>
         <td style="${S.td}">${i+1}</td>
         <td style="${S.td}">&nbsp;</td>
@@ -5162,11 +5175,11 @@ function exportApprovalXlsx(items){
       </tr>
       ${domSupply ? `<tr>
         <td colspan="6" style="${S.sum}">부가세 (10%)</td>
-        <td style="${S.sumR}">${fmtN(domVat(domSupply))}</td>
+        <td style="${S.sumR}">${fmtN(domVatSum)}</td>
       </tr>
       <tr>
         <td colspan="6" style="${S.sum}">합계 (부가세 포함)</td>
-        <td style="${S.sumR}">${fmtN(amtTotal + domVat(domSupply))}</td>
+        <td style="${S.sumR}">${fmtN(amtTotal + domVatSum)}</td>
       </tr>` : ''}
       <tr><td colspan="7" style="${S.spacer}">&nbsp;</td></tr>`;
   }).join('');
