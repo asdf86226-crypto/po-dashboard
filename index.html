@@ -1563,8 +1563,8 @@ function showReqImportDialog(plan){
       const kind = x.g ? x.g.kind : defKind;
       const hint = x.g ? (x.g.byBase ? '비슷한 품목코드 이력' : '발주 이력') : '처음 보는 품목';
       return '<div class="ri-row" data-i="' + i + '" data-new="' + (x.g ? '0' : '1') + '" style="display:flex; flex-wrap:wrap; align-items:center; gap:8px; padding:10px 2px; border-bottom:1px solid var(--line);">'
-        + '<div style="flex:1 1 220px; min-width:0;"><b>' + esc(x.r.itemName || '-') + '</b> <span style="color:var(--ink-soft);">· ' + esc(x.r.qty || '') + '개</span>'
-        + '<div style="font-size:11px; color:var(--ink-soft);">' + esc(x.r.code || '') + ' · <span style="color:' + (x.g ? '#0d9488' : '#b45309') + ';">' + hint + '</span></div></div>'
+        + '<div style="flex:1 1 220px; min-width:0;"><b>' + esc(x.r.code || '-') + '</b> <span style="color:var(--ink-soft);">· ' + esc(x.r.qty || '') + '개</span>'
+        + '<div style="font-size:11px; color:var(--ink-soft);">' + esc(x.r.itemName || '') + ' · <span style="color:' + (x.g ? '#0d9488' : '#b45309') + ';">' + hint + '</span></div></div>'
         + '<select class="ri-kind" style="flex:0 0 auto; width:auto; padding:6px 8px;"><option value="po"' + (kind === 'po' ? ' selected' : '') + '>해외</option><option value="dom"' + (kind === 'dom' ? ' selected' : '') + '>국내</option></select>'
         + '<select class="ri-sup" style="flex:0 0 170px; width:170px; padding:6px 8px;">' + supOptions(kind, x.g ? x.g.supplier : '') + '</select>'
         + '</div>';
