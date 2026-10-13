@@ -216,6 +216,13 @@
     /* 업체 하나만 인쇄/PDF 할 때 — 나머지 업체 묶음은 숨김 */
     body.poc-print-one #pocResultPrint .poc-group:not(.poc-print-target){display:none !important;}
     body.poc-print-one #pocResultPrint .poc-print-target{break-before:auto !important;}
+    /* A4 폭 안에 표가 다 들어가게 — 화면용 표 최소폭(1400px)·줄바꿈 금지를 인쇄에서는 해제 */
+    #pocResultPrint .poc-table{min-width:0 !important; width:100% !important;}
+    #pocResultPrint .poc-table th{padding:6px 5px; font-size:10px; white-space:normal;}
+    #pocResultPrint .poc-table td{padding:6px 5px; font-size:10.5px; white-space:normal; word-break:keep-all; overflow-wrap:break-word; vertical-align:middle;}
+    #pocResultPrint .poc-table td[style*="text-align:right"], #pocResultPrint .poc-table td:first-child{white-space:nowrap; font-size:10px;}
+    #pocResultPrint .poc-table td:first-child, #pocResultPrint .poc-table th:first-child{padding-left:8px;}
+    #pocResultPrint .poc-group-head .sub{color:#333 !important;}
     .appr-line-table th{background:#eee !important; -webkit-print-color-adjust:exact; print-color-adjust:exact;}
   }
 
@@ -4340,6 +4347,8 @@ function pocDomTotals(items){
   items.filter(p=>p._isDom).forEach(p=>{ const a = pocDomLineAmount(p); supply += a; vat += domVat(a); });
   return { supply, vat, total: supply + vat };
 }
+// A4 인쇄/PDF용 칸 너비 (국내 10칸 / 해외 6칸)
+const POC_DOM_COLS_PRINT = '<col style="width:10%"><col style="width:10%"><col style="width:18%"><col style="width:6%"><col style="width:8%"><col style="width:11%"><col style="width:9%"><col style="width:11%"><col style="width:10%"><col style="width:7%">';
 const POC_DOM_COLS = '<col style="width:8%"><col style="width:10%"><col style="width:17%"><col style="width:6%"><col style="width:9%"><col style="width:10%"><col style="width:9%"><col style="width:10%"><col style="width:9%"><col style="width:12%">';
 function pocDomHead(noteLabel){
   return '<tr><th>요청일</th><th>품목코드</th><th>품명</th><th>수량</th>'
@@ -4450,7 +4459,7 @@ function renderPocResult(){
     const domT = pocDomTotals(items);
     const letterhead = pocLetterheadHtml(hasDom ? domKey : 'flowtech_en', todayStr);
     const cols = hasDom
-      ? POC_DOM_COLS
+      ? POC_DOM_COLS_PRINT
       : '<col style="width:11%"><col style="width:13%"><col style="width:24%"><col style="width:8%"><col style="width:13%"><col style="width:31%">';
     const head = hasDom
       ? pocDomHead('비고')
