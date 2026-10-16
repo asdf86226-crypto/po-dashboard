@@ -1465,6 +1465,11 @@ async function loadData(){
     try{
       const r = await window.storage.get('domesticPos', false);
       domesticPos = r ? JSON.parse(r.value) : [];
+      // 입고됐는데 잔금지급 예정일이 비어 있는 국내발주는 입고월 다음 달 말일로 채운다 (선금 100%·지급완료 건 제외)
+      domesticPos.forEach(p => {
+        if(p.warehouseDate && !p.balancePlannedDate && !p.balanceDate && (parseFloat(p.depositPct)||0) < 100)
+          p.balancePlannedDate = endOfNextMonth(p.warehouseDate);
+      });
     }catch(e){ domesticPos = []; }
     showStockSrc(null, false);
     pushPoStatusSoon();   // 열 때 한 번 — 다른 PC에서 고친 내용도 구매요청 화면에 맞춘다
@@ -3090,9 +3095,16 @@ function toMonthCostItem(p, source){
     balancePaid, balanceDate: p.balanceDate, balanceAmountKrw,
     erpDate: p.erpDate,
     warehouseDate: p.warehouseDate || '',
+    balancePlannedDate: p.balancePlannedDate || '',
     // 어느 달 비용으로 볼지 — 입고된 국내발주는 입고월 다음 달에 지급되므로 그 달, 나머지는 납기요청일의 달
-    payMonth: (!isOverseas && p.warehouseDate) ? nextMonthOf(p.warehouseDate) : (p.dueDate||'').slice(0,7),
+    payMonth: (!isOverseas && p.warehouseDate) ? ((p.balancePlannedDate||'').slice(0,7) || nextMonthOf(p.warehouseDate))
+                                               : (p.dueDate||'').slice(0,7),
   };
+}
+// 'YYYY-MM-DD' → 다음 달 말일 'YYYY-MM-DD' (국내발주 잔금지급 예정일 기본값)
+function endOfNextMonth(dateStr){
+  const y = parseInt(dateStr.slice(0,4),10), m = parseInt(dateStr.slice(5,7),10);
+  return isoDate(new Date(y, m+1, 0));   // m+1월의 0일 = 다음 달 말일
 }
 // 'YYYY-MM-DD' → 다음 달 'YYYY-MM'
 function nextMonthOf(dateStr){
@@ -3295,7 +3307,7 @@ function openMonthCostDetail(key){
     <div class="day-item" data-id="${it.id}" data-source="${it.source}">
       <div class="info">
         <span class="name">${it.itemName || '(품명 미입력)'}${it.itemCode ? `<span style="font-weight:700; font-size:13.5px; color:#b7bec7; margin-left:6px;">/ ${it.itemCode}</span>` : ''}</span>
-        <span class="sub">${it.supplier||'-'} · ${(it.source!=='overseas' && it.warehouseDate) ? `입고 ${it.warehouseDate} → 다음 달 지급` : `납기 ${it.dueDate||'-'}`} · ${it.source==='overseas'?'해외':'국내'}${paidNote?' · '+paidNote:''}</span>
+        <span class="sub">${it.supplier||'-'} · ${(it.source!=='overseas' && it.warehouseDate) ? `입고 ${it.warehouseDate} → 잔금예정 ${it.balancePlannedDate||'다음 달'}` : `납기 ${it.dueDate||'-'}`} · ${it.source==='overseas'?'해외':'국내'}${paidNote?' · '+paidNote:''}</span>
       </div>
       <span class="ddays upcoming" title="${remainLabel}">${fmtKrw(it.amountKrw)}</span>
     </div>
@@ -4858,6 +4870,7 @@ function updateDomComputedPreview(){
 function openDomPanel(id){
   editingDomId = id || null;
   domForm.reset();
+  delete domForm.elements['balancePlannedDate'].dataset.auto;   // 자동 채움 표시는 건마다 새로
   ['depositShared','balanceShared','warehouseShared'].forEach(name=>{ domForm.elements[name].value = ''; });
   document.getElementById('domPanelTitle').textContent = id ? '국내발주 수정' : '새 국내발주 등록';
   document.getElementById('domDeleteLink').style.display = id ? 'block' : 'none';
@@ -4937,6 +4950,12 @@ domForm.addEventListener('input', (e)=>{
   }
   if(e.target.name==='warehouseDate'){
     domForm.elements['warehouseShared'].value = e.target.value ? 'O' : '';
+    // 국내발주 잔금은 입고월 다음 달 말일에 나간다 — 비어 있거나 전에 자동으로 넣은 값일 때만 채운다
+    const bp = domForm.elements['balancePlannedDate'];
+    if(bp && !bp.disabled && e.target.value && (!bp.value || bp.value === bp.dataset.auto)){
+      bp.value = endOfNextMonth(e.target.value);
+      bp.dataset.auto = bp.value;
+    }
   }
   syncDomShareDisplays();
 });
