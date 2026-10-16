@@ -59,6 +59,8 @@
   body.viewer .brand .go-link{display:none}   /* 공유 열람용 화면에서는 숨김 */
   .brand .sub{font-size:12px; color:#aab7c6; margin-left:2px; font-family:var(--sans); font-weight:600; letter-spacing:.2px; border-left:1px solid #3a4a68; padding-left:12px;}
   .tabs{display:flex; gap:4px; flex-wrap:wrap; justify-content:flex-end;}
+  .stock-src{font-size:12px; color:var(--muted, #8a8476); align-self:center; white-space:nowrap}
+  .stock-src.sp{color:#0f7a5a; font-weight:700}
   .topbar{flex-wrap:wrap; row-gap:10px;}
   .tab{white-space:nowrap}   /* 화면이 좁으면 메뉴 글자를 꺾지 말고 줄을 바꾼다 */
   .tab{
@@ -639,6 +641,7 @@
 
   <div class="topbar-tools" id="topbarTools">
     <button class="btn ghost" id="btnPullReq" title="팀에서 올린 구매요청과 ERP 재고현황을 함께 가져옵니다">📥 구매요청 및 재고 가져오기</button>
+    <span class="stock-src" id="stockSrcNote" title="마지막으로 가져온 재고가 어디 기준인지"></span>
     <button class="btn ghost" id="btnExport" title="현재 데이터를 JSON 파일로 백업합니다 (다른 PC/브라우저로 옮길 때 사용)">⬇ 저장하기 (JSON 백업)</button>
     <button class="btn ghost" id="btnImport" title="JSON 백업을 불러옵니다 (다른 곳에서 만든 데이터를 이 브라우저에 넣을 때)">⬆ 불러오기 (JSON 복원)</button>
     <input type="file" id="fileImport" accept="application/json" style="display:none;">
@@ -1463,6 +1466,7 @@ async function loadData(){
       const r = await window.storage.get('domesticPos', false);
       domesticPos = r ? JSON.parse(r.value) : [];
     }catch(e){ domesticPos = []; }
+    showStockSrc(null, false);
     pushPoStatusSoon();   // 열 때 한 번 — 다른 PC에서 고친 내용도 구매요청 화면에 맞춘다
     try{
       const r = await window.storage.get('approvalBatches', false);
@@ -1778,6 +1782,21 @@ async function mmsStockFromSharePoint(){
   const pad = n => String(n).padStart(2,'0');
   return { stock, known, at: d ? `${d.getMonth()+1}/${d.getDate()} ${pad(d.getHours())}:${pad(d.getMinutes())}` : '' };
 }
+// 버튼 옆에 '재고가 어디 기준인지 · 언제 가져왔는지'를 계속 보여 준다 (알림은 금방 사라지므로)
+const STOCK_SRC_KEY = 'po_dash:stockSrc';
+function showStockSrc(text, save){
+  const el = document.getElementById('stockSrcNote'); if(!el) return;
+  let v = null;
+  if(save){
+    const d = new Date(), p2 = n => String(n).padStart(2,'0');
+    v = { text, at: `${d.getMonth()+1}/${d.getDate()} ${p2(d.getHours())}:${p2(d.getMinutes())}` };
+    try{ localStorage.setItem(STOCK_SRC_KEY, JSON.stringify(v)); }catch(e){}
+  }else{
+    try{ v = JSON.parse(localStorage.getItem(STOCK_SRC_KEY) || 'null'); }catch(e){}
+  }
+  el.textContent = v ? `${v.text} · ${v.at} 가져옴` : '';
+  el.classList.toggle('sp', !!(v && /쉐어포인트/.test(v.text)));
+}
 async function pullPurchaseRequests(){
   let url = reqGetUrl();
   if(!url){
@@ -1876,6 +1895,7 @@ async function pullPurchaseRequests(){
     let stockUpdated = 0;
     const haveAny = erpKnownCodes.size > 0;
     const stockSrc = spStockAt ? '재고: 쉐어포인트 ' + spStockAt + ' 기준' : '재고: 구매요청 대시보드 기준';
+    showStockSrc(stockSrc, true);
     if(haveAny){
       const applyStock = list => list.forEach(p => {
         if(!p.itemCode) return;
