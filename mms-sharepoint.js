@@ -83,9 +83,28 @@
     try { return !!accountOf(await getApp()); } catch (e) { return false; }
   }
 
-  function itemUrl(path) {
+  // 사이트 주소(…:/sites/TADC:)와 파일 경로(root:/…)를 한 주소에 이어 쓰면 Graph 가 거부한다
+  // ("Resource not found for the segment 'root:'"). 사이트 고유번호를 먼저 받아 두고 그걸로 파일을 찾는다.
+  const SITE_KEY = 'mmsSpSiteId:' + CFG.host + CFG.site;
+  let siteIdPromise = null;
+  function siteId(t) {
+    if (!siteIdPromise) {
+      siteIdPromise = (async () => {
+        try { const c = localStorage.getItem(SITE_KEY); if (c) return c; } catch (e) {}
+        const res = await fetch(`https://graph.microsoft.com/v1.0/sites/${CFG.host}:${CFG.site}?$select=id`,
+                                { headers: { Authorization: 'Bearer ' + t } });
+        if (!res.ok) throw await httpError(res, '쉐어포인트 사이트 ' + CFG.site);
+        const id = (await res.json()).id;
+        try { localStorage.setItem(SITE_KEY, id); } catch (e) {}
+        return id;
+      })().catch(e => { siteIdPromise = null; throw e; });
+    }
+    return siteIdPromise;
+  }
+
+  async function itemUrl(path, t) {
     const parts = [CFG.root].concat(String(path).split('/')).filter(Boolean).map(encodeURIComponent);
-    return `https://graph.microsoft.com/v1.0/sites/${CFG.host}:${CFG.site}:/drive/root:/${parts.join('/')}`;
+    return `https://graph.microsoft.com/v1.0/sites/${await siteId(t)}/drive/root:/${parts.join('/')}`;
   }
 
   async function httpError(res, what) {
@@ -99,7 +118,7 @@
   /** 파일 정보(수정 시각, eTag, 다운로드 주소) */
   async function meta(path, interactive) {
     const t = await token(interactive);
-    const res = await fetch(itemUrl(path), { headers: { Authorization: 'Bearer ' + t }, cache: 'no-store' });
+    const res = await fetch(await itemUrl(path, t), { headers: { Authorization: 'Bearer ' + t }, cache: 'no-store' });
     if (!res.ok) throw await httpError(res, path);
     return res.json();
   }
