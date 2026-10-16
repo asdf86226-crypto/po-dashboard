@@ -1522,17 +1522,25 @@ async function saveDomesticPos(){
  * 팀원이 구매요청 화면에서 "내 요청이 어디까지 왔는지" 볼 수 있게, 구매요청에서 가져온 건(srcId)의
  * 진행 단계 · 입고예정일만 구매요청 Apps Script 로 보낸다. 공급사 · 금액 · 송금 정보는 보내지 않는다.
  * 저장할 때마다 몇 초 모았다가 한 번, 바뀐 게 있을 때만 보낸다. */
+// 팀원용 단계 — 대금 지급(선금·잔금·입고후지급) 상태는 보이지 않게 쉬운 다섯 단계로 묶는다
+const TEAM_STEPS = ['발주 준비중', '발주 진행중', '운송중', '입고완료', '입고완료 (검수 끝)'];
+function teamStep(p, isDom){
+  if(p.qcDate || p.erpDate) return 4;
+  if(p.warehouseDate) return 3;
+  if(!isDom && (p.shipDate || p.etaDate)) return 2;
+  const started = isDom ? computeDomStageIndex(p) > 0
+                        : !!(p.piDate || isDepositDone(p) || p.ciDate || isBalanceDone(p));
+  return started ? 1 : 0;
+}
 function poStatusItems(){
   const out = [];
-  const add = (p, kind, idx, labels, isDom) => out.push({
-    id: p.srcId, kind,
-    stage: idx===0 ? '발주 준비중' : stageLabelText(p, idx, isDom),
-    step: idx+1, steps: labels.length,
-    eta: p.warehousePlanned || p.etaDate || p.etaPlanned || '',
-    done: p.warehouseDate || '',
-  });
-  pos.forEach(p => { if(p.srcId) add(p, '해외', computeStageIndex(p), STAGE_LABELS, false); });
-  domesticPos.forEach(p => { if(p.srcId) add(p, '국내', computeDomStageIndex(p), DOM_STAGE_LABELS, true); });
+  const add = (p, kind, isDom) => {
+    const i = teamStep(p, isDom);
+    out.push({ id: p.srcId, kind, stage: TEAM_STEPS[i], step: i+1, steps: TEAM_STEPS.length,
+               eta: p.warehousePlanned || p.etaDate || p.etaPlanned || '', done: p.warehouseDate || '' });
+  };
+  pos.forEach(p => { if(p.srcId) add(p, '해외', false); });
+  domesticPos.forEach(p => { if(p.srcId) add(p, '국내', true); });
   return out;
 }
 let _poStatusTimer = null, _poStatusSent = '';
@@ -1867,6 +1875,7 @@ async function pullPurchaseRequests(){
     //   '' / undefined : 조회조차 안 된 상태 → 공란
     let stockUpdated = 0;
     const haveAny = erpKnownCodes.size > 0;
+    const stockSrc = spStockAt ? '재고: 쉐어포인트 ' + spStockAt + ' 기준' : '재고: 구매요청 대시보드 기준';
     if(haveAny){
       const applyStock = list => list.forEach(p => {
         if(!p.itemCode) return;
@@ -1887,9 +1896,9 @@ async function pullPurchaseRequests(){
       if(stockUpdated){
         await savePos(); await saveDomesticPos();
         render();
-        toast('재고 ' + stockUpdated + '건을 갱신했습니다' + (spStockAt ? ' (쉐어포인트 ' + spStockAt + ' 기준)' : '') + ' (새 구매요청 없음, 전체 ' + rows.length + '건)');
+        toast('재고 ' + stockUpdated + '건을 갱신했습니다 (새 구매요청 없음, 전체 ' + rows.length + '건)\n' + stockSrc, 6000);
       }else{
-        toast('새로 가져올 구매요청이 없습니다 (전체 ' + rows.length + '건, 모두 등록됨)');
+        toast('새로 가져올 구매요청이 없습니다 (전체 ' + rows.length + '건, 모두 등록됨)\n' + stockSrc + ' · 바뀐 재고 없음', 6000);
       }
       return;
     }
@@ -1898,7 +1907,7 @@ async function pullPurchaseRequests(){
     const chosen = await showReqImportDialog(plan);
     if(!chosen){
       // 새 건은 취소했어도 재고 갱신은 유효하게 저장
-      if(stockUpdated){ await savePos(); await saveDomesticPos(); render(); toast('재고 ' + stockUpdated + '건을 갱신했습니다'); }
+      if(stockUpdated){ await savePos(); await saveDomesticPos(); render(); toast('재고 ' + stockUpdated + '건을 갱신했습니다\n' + stockSrc, 6000); }
       return;
     }
     let nOv = 0, nDom = 0, nNoSup = 0;
@@ -1910,7 +1919,7 @@ async function pullPurchaseRequests(){
     await savePos();
     await saveDomesticPos();
     render();
-    toast('해외 ' + nOv + '건 · 국내 ' + nDom + '건 등록' + (nNoSup ? ' (공급사 미지정 ' + nNoSup + '건)' : '') + (stockUpdated ? ' · 재고 ' + stockUpdated + '건 갱신' : ''), 7000);
+    toast('해외 ' + nOv + '건 · 국내 ' + nDom + '건 등록' + (nNoSup ? ' (공급사 미지정 ' + nNoSup + '건)' : '') + (stockUpdated ? ' · 재고 ' + stockUpdated + '건 갱신' : '') + '\n' + stockSrc, 7000);
   }catch(err){
     console.error(err);
     toast('가져오기 실패: ' + (err && err.message ? err.message : '알 수 없는 오류'));
