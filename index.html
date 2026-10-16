@@ -629,6 +629,7 @@
   </div>
 
   <div class="topbar-tools" id="topbarTools">
+    <a class="btn ghost" id="btnGoReq" href="../pr-dashboard/" title="구매요청 대시보드로 이동합니다" style="text-decoration:none">📝 구매요청 대시보드</a>
     <button class="btn ghost" id="btnPullReq" title="팀에서 올린 구매요청과 ERP 재고현황을 함께 가져옵니다">📥 구매요청 및 재고 가져오기</button>
     <button class="btn ghost" id="btnExport" title="현재 데이터를 JSON 파일로 백업합니다 (다른 PC/브라우저로 옮길 때 사용)">⬇ 저장하기 (JSON 백업)</button>
     <button class="btn ghost" id="btnImport" title="JSON 백업을 불러옵니다 (다른 곳에서 만든 데이터를 이 브라우저에 넣을 때)">⬆ 불러오기 (JSON 복원)</button>
@@ -1454,6 +1455,7 @@ async function loadData(){
       const r = await window.storage.get('domesticPos', false);
       domesticPos = r ? JSON.parse(r.value) : [];
     }catch(e){ domesticPos = []; }
+    pushPoStatusSoon();   // 열 때 한 번 — 다른 PC에서 고친 내용도 구매요청 화면에 맞춘다
     try{
       const r = await window.storage.get('approvalBatches', false);
       approvalBatches = r ? JSON.parse(r.value) : [];
@@ -1495,17 +1497,51 @@ async function saveFxRates(){
   try{ await window.storage.set('fxRates', JSON.stringify(fxRates), false); }catch(e){ console.error(e); }
 }
 async function savePos(){
+  pushPoStatusSoon();
   if(!hasStorage) return; // in-memory only; user backs up via 내보내기
   try{
     await window.storage.set('pos', JSON.stringify(pos), false);
   }catch(e){ console.error(e); }
 }
 async function saveDomesticPos(){
+  pushPoStatusSoon();
   if(!hasStorage) return;
   try{
     await window.storage.set('domesticPos', JSON.stringify(domesticPos), false);
   }catch(e){ console.error(e); }
 }
+/* ===================== 발주 진행 상태 → 구매요청 대시보드 =====================
+ * 팀원이 구매요청 화면에서 "내 요청이 어디까지 왔는지" 볼 수 있게, 구매요청에서 가져온 건(srcId)의
+ * 진행 단계 · 입고예정일만 구매요청 Apps Script 로 보낸다. 공급사 · 금액 · 송금 정보는 보내지 않는다.
+ * 저장할 때마다 몇 초 모았다가 한 번, 바뀐 게 있을 때만 보낸다. */
+function poStatusItems(){
+  const out = [];
+  const add = (p, kind, idx, labels, isDom) => out.push({
+    id: p.srcId, kind,
+    stage: idx===0 ? '발주 준비중' : stageLabelText(p, idx, isDom),
+    step: idx+1, steps: labels.length,
+    eta: p.warehousePlanned || p.etaDate || p.etaPlanned || '',
+    done: p.warehouseDate || '',
+  });
+  pos.forEach(p => { if(p.srcId) add(p, '해외', computeStageIndex(p), STAGE_LABELS, false); });
+  domesticPos.forEach(p => { if(p.srcId) add(p, '국내', computeDomStageIndex(p), DOM_STAGE_LABELS, true); });
+  return out;
+}
+let _poStatusTimer = null, _poStatusSent = '';
+function pushPoStatusSoon(){ clearTimeout(_poStatusTimer); _poStatusTimer = setTimeout(pushPoStatus, 4000); }
+async function pushPoStatus(){
+  const url = reqGetUrl();
+  if(!url) return;                                   // 구매요청 대시보드 주소를 아직 모르면 보내지 않는다
+  const items = poStatusItems();
+  const sig = JSON.stringify(items);
+  if(sig === _poStatusSent) return;
+  try{
+    await fetch(url, { method:'POST', mode:'no-cors', headers:{'Content-Type':'text/plain;charset=utf-8'},
+                       body: JSON.stringify({ action:'poStatus', items, at:new Date().toISOString() }) });
+    _poStatusSent = sig;
+  }catch(e){ console.warn('[발주상태] 구매요청 대시보드로 보내기 실패:', e && e.message); }
+}
+
 /* ===================== 구매요청 가져오기 (구매요청 대시보드 연동) ===================== */
 const REQ_CFG_KEY = 'purchaseReqExecUrl';
 function reqGetUrl(){
