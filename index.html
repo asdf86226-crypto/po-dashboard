@@ -1291,6 +1291,7 @@
 
 <div class="toast" id="toast"></div>
 
+<script src="mms-sharepoint.js"></script>
 <script>
 // 공유용 보기 파일로 내보낸 경우, 데이터 스냅샷이 <head>에 window.__SHARED_SNAPSHOT__ 으로 주입된다.
 // 이 값이 있으면 "읽기전용 공유 열람 모드"로 동작한다(저장 없음, 편집 UI 숨김).
@@ -1687,6 +1688,44 @@ function reqToPo(r){
     isFirstBatch:false, isSample:false, isUrgent:false
   };
 }
+// 쉐어포인트 MMS 폴더의 두 회사 재고현황 · 품목정보 엑셀을 읽어 품목코드별 재고를 합친다.
+//   stock : 품목코드 → 두 회사 재고 합계
+//   known : 이카운트에 등록된 품목코드 전체 (품목정보 + 재고현황) — 재고가 없으면 0, 여기 없으면 '미등록'
+async function mmsStockFromSharePoint(){
+  await loadScriptOnce('vendor/xlsx.min.js');
+  const stock = {}, known = new Set();
+  let at = '';
+  const readRows = bytes => {
+    const wb = XLSX.read(new Uint8Array(bytes), { type:'array' });
+    return XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header:1, raw:false, defval:'' });
+  };
+  const headerAt = (rows, need) => rows.findIndex(r => need.every(h => r.some(c => String(c).replace(/\s+/g,'') === h)));
+  const col = (row, name) => row.findIndex(c => String(c).replace(/\s+/g,'') === name);
+  for(const company of MmsSp.COMPANIES){
+    const st = await MmsSp.download(MmsSp.reportPath(company, '재고현황'), false);
+    const rows = readRows(st.bytes);
+    const hi = headerAt(rows, ['품목코드','재고수량']);
+    if(hi < 0) throw new Error(company + ' 재고현황에서 품목코드·재고수량 열을 찾지 못했습니다');
+    const cC = col(rows[hi], '품목코드'), cQ = col(rows[hi], '재고수량');
+    for(let i=hi+1; i<rows.length; i++){
+      const code = String(rows[i][cC] || '').trim();
+      if(!code) continue;
+      const q = parseFloat(String(rows[i][cQ]).replace(/,/g,''));
+      known.add(code);
+      if(isFinite(q)) stock[code] = Math.round(((stock[code] || 0) + q) * 100) / 100;
+    }
+    const t = st.meta.lastModifiedDateTime ? new Date(st.meta.lastModifiedDateTime) : null;
+    if(t && (!at || t < new Date(at))) at = t.toISOString();
+    try{
+      const pm = await MmsSp.download(MmsSp.reportPath(company, '품목정보'), false);
+      const pr = readRows(pm.bytes), ph = headerAt(pr, ['품목코드']);
+      if(ph >= 0){ const pc = col(pr[ph], '품목코드'); for(let i=ph+1; i<pr.length; i++){ const c = String(pr[i][pc] || '').trim(); if(c) known.add(c); } }
+    }catch(e){ console.warn('[재고] ' + company + ' 품목정보를 못 읽었습니다 (재고현황 품목만 등록으로 봅니다):', e); }
+  }
+  const d = at ? new Date(at) : null;
+  const pad = n => String(n).padStart(2,'0');
+  return { stock, known, at: d ? `${d.getMonth()+1}/${d.getDate()} ${pad(d.getHours())}:${pad(d.getMinutes())}` : '' };
+}
 async function pullPurchaseRequests(){
   let url = reqGetUrl();
   if(!url){
@@ -1699,6 +1738,15 @@ async function pullPurchaseRequests(){
   const btn = document.getElementById('btnPullReq');
   const old = btn ? btn.textContent : '';
   if(btn){ btn.disabled = true; btn.textContent = '가져오는 중...'; }
+  // 재고는 쉐어포인트(MMS가 매시간 올리는 이카운트 재고)에서 먼저 받는다.
+  // 로그인 창은 버튼을 누른 직후에 띄워야 팝업이 막히지 않아 제일 먼저 로그인한다.
+  let spReady = false;
+  try{ if(!window.MmsSp) throw new Error('mms-sharepoint.js 를 불러오지 못했습니다'); await MmsSp.token(true); spReady = true; }
+  catch(e){
+    const t = MmsSp.errorText(e);
+    console.warn('[재고] 쉐어포인트 로그인 실패 → 구매요청 Apps Script 재고로 대신합니다:', e);
+    if(t) toast('쉐어포인트 연결 실패 — 예전 방식(구매요청 대시보드) 재고를 씁니다\n' + t, 8000);
+  }
   try{
     const res = await reqFetch(url);
     if(!res || !res.ok) throw new Error('응답 형식 오류');
@@ -1713,9 +1761,22 @@ async function pullPurchaseRequests(){
     // 이렇게 하면 "ERP에 등록은 되어 있는데 재고가 비어있는 품목"은 0으로, 아예 ERP에 없는 품목만 '미등록'으로 구분 가능.
     const stockByCode = {};
     const erpKnownCodes = new Set();
+    let spStockAt = '';
+    if(spReady){
+      try{
+        const sp = await mmsStockFromSharePoint();
+        Object.assign(stockByCode, sp.stock);
+        sp.known.forEach(c => erpKnownCodes.add(c));
+        spStockAt = sp.at;
+        console.log('[재고] 쉐어포인트 재고:', Object.keys(sp.stock).length, '품목 · 등록 품목', sp.known.size, '· 기준', sp.at);
+      }catch(e){
+        console.warn('[재고] 쉐어포인트 재고 실패 → 구매요청 Apps Script 재고로 대신합니다:', e);
+        toast('쉐어포인트 재고를 못 읽었습니다 — 예전 방식 재고를 씁니다\n' + MmsSp.errorText(e), 8000);
+      }
+    }
     const erpUrl = url + (url.indexOf('?')>=0 ? '&' : '?') + 'erp=data';
-    console.log('[재고] ?erp=data 호출 →', erpUrl);
-    try{
+    if(!spStockAt) console.log('[재고] ?erp=data 호출 →', erpUrl);
+    if(!spStockAt) try{
       const erp = await reqFetch(erpUrl);
       console.log('[재고] ?erp=data 응답:', erp);
       // erp blob: {updatedAt, items:{code:{s,...}}}  — 또는 {ok:true, erp:{items:{...}}} 로 래핑돼서 올 수 있음
@@ -1782,7 +1843,7 @@ async function pullPurchaseRequests(){
       if(stockUpdated){
         await savePos(); await saveDomesticPos();
         render();
-        toast('재고 ' + stockUpdated + '건을 갱신했습니다 (새 구매요청 없음, 전체 ' + rows.length + '건)');
+        toast('재고 ' + stockUpdated + '건을 갱신했습니다' + (spStockAt ? ' (쉐어포인트 ' + spStockAt + ' 기준)' : '') + ' (새 구매요청 없음, 전체 ' + rows.length + '건)');
       }else{
         toast('새로 가져올 구매요청이 없습니다 (전체 ' + rows.length + '건, 모두 등록됨)');
       }
