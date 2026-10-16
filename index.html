@@ -835,7 +835,7 @@
   <!-- ===================== MONTHLY COST FORECAST ===================== -->
   <div class="view" id="view-monthcost">
     <div class="view-header"><span class="vlabel">월별 예상 비용</span></div>
-    <div class="cal-hint">각 발주의 납기요청일 기준으로 월별 예상 지출 합계를 보여줍니다. 해외는 CI금액(없으면 PI금액)을 환율로 환산, 국내는 실제입고금액(없으면 발주금액) 기준이며, <b>입고된 국내발주는 입고월 다음 달</b>에 지급되는 돈으로 잡습니다. <b>선금·잔금 지급일이 입력되지 않은(=아직 지급 전) 금액만 예상비용으로 합산</b>되며, 지급일이 입력된 금액은 합계에서 빠지고 아래 <b>"선금 지급내역"·"잔금 지급내역"</b>에 <b>CI번호 기준</b>으로 묶여 표시됩니다(CI 미발행이면 PI 기준, 국내발주는 건별). 종결(ERP입력완료)된 건은 월별 합계에서 제외되며, 그중 <b>아직 지급되지 않은 금액이 남은 건은 맨 아래 "ERP입력 완료 · 미지급"</b>에 따로 모아 보여줍니다.</div>
+    <div class="cal-hint">각 발주의 납기요청일 기준으로 월별 예상 지출 합계를 보여줍니다. 해외는 CI금액(없으면 PI금액)을 환율로 환산, 국내는 실제입고금액(없으면 발주금액) 기준이며, <b>국내발주는 입고월 다음 달 말일</b>에 지급되는 돈으로 잡습니다(잔금지급 예정일이 있으면 그 달, 아직 입고 전이면 입고요청일 다음 달). <b>선금·잔금 지급일이 입력되지 않은(=아직 지급 전) 금액만 예상비용으로 합산</b>되며, 지급일이 입력된 금액은 합계에서 빠지고 아래 <b>"선금 지급내역"·"잔금 지급내역"</b>에 <b>CI번호 기준</b>으로 묶여 표시됩니다(CI 미발행이면 PI 기준, 국내발주는 건별). 종결(ERP입력완료)된 건은 월별 합계에서 제외되며, 그중 <b>아직 지급되지 않은 금액이 남은 건은 맨 아래 "ERP입력 완료 · 미지급"</b>에 따로 모아 보여줍니다.</div>
 
     <div class="view-header" style="margin-top:8px;"><span class="vlabel">해외 발주 · 월별 예상 비용</span></div>
     <div class="mc-grand-row">
@@ -3096,9 +3096,12 @@ function toMonthCostItem(p, source){
     erpDate: p.erpDate,
     warehouseDate: p.warehouseDate || '',
     balancePlannedDate: p.balancePlannedDate || '',
-    // 어느 달 비용으로 볼지 — 입고된 국내발주는 입고월 다음 달에 지급되므로 그 달, 나머지는 납기요청일의 달
-    payMonth: (!isOverseas && p.warehouseDate) ? ((p.balancePlannedDate||'').slice(0,7) || nextMonthOf(p.warehouseDate))
-                                               : (p.dueDate||'').slice(0,7),
+    // 어느 달 비용으로 볼지
+    //   해외: 납기요청일의 달
+    //   국내: 대금은 입고월 다음 달 말일에 나간다 → 잔금지급 예정일 > 입고일 다음 달 > (입고 전) 입고요청일 다음 달
+    payMonth: isOverseas ? (p.dueDate||'').slice(0,7)
+            : ((p.balancePlannedDate||'').slice(0,7)
+               || (p.warehouseDate ? nextMonthOf(p.warehouseDate) : (p.dueDate ? nextMonthOf(p.dueDate) : ''))),
   };
 }
 // 'YYYY-MM-DD' → 다음 달 말일 'YYYY-MM-DD' (국내발주 잔금지급 예정일 기본값)
@@ -3307,7 +3310,9 @@ function openMonthCostDetail(key){
     <div class="day-item" data-id="${it.id}" data-source="${it.source}">
       <div class="info">
         <span class="name">${it.itemName || '(품명 미입력)'}${it.itemCode ? `<span style="font-weight:700; font-size:13.5px; color:#b7bec7; margin-left:6px;">/ ${it.itemCode}</span>` : ''}</span>
-        <span class="sub">${it.supplier||'-'} · ${(it.source!=='overseas' && it.warehouseDate) ? `입고 ${it.warehouseDate} → 잔금예정 ${it.balancePlannedDate||'다음 달'}` : `납기 ${it.dueDate||'-'}`} · ${it.source==='overseas'?'해외':'국내'}${paidNote?' · '+paidNote:''}</span>
+        <span class="sub">${it.supplier||'-'} · ${it.source==='overseas' ? `납기 ${it.dueDate||'-'}`
+          : it.warehouseDate ? `입고 ${it.warehouseDate} → 잔금예정 ${it.balancePlannedDate||'다음 달 말일'}`
+          : `입고요청 ${it.dueDate||'-'} → ${it.balancePlannedDate ? '잔금예정 '+it.balancePlannedDate : '다음 달 말일 지급 예정'}`} · ${it.source==='overseas'?'해외':'국내'}${paidNote?' · '+paidNote:''}</span>
       </div>
       <span class="ddays upcoming" title="${remainLabel}">${fmtKrw(it.amountKrw)}</span>
     </div>
