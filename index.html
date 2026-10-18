@@ -1814,14 +1814,15 @@ async function pullPurchaseRequests(){
   const btn = document.getElementById('btnPullReq');
   const old = btn ? btn.textContent : '';
   if(btn){ btn.disabled = true; btn.textContent = '가져오는 중...'; }
-  // 재고는 쉐어포인트(MMS가 매시간 올리는 이카운트 재고)에서 먼저 받는다.
+  // 재고는 쉐어포인트(MMS가 매시간 올리는 이카운트 재고)에서 받는다.
   // 로그인 창은 버튼을 누른 직후에 띄워야 팝업이 막히지 않아 제일 먼저 로그인한다.
+  // 못 받으면 재고는 손대지 않고(지난 값 유지) 구매요청만 가져온다.
   let spReady = false;
   try{ if(!window.MmsSp) throw new Error('mms-sharepoint.js 를 불러오지 못했습니다'); await MmsSp.token(true); spReady = true; }
   catch(e){
-    const t = MmsSp.errorText(e);
-    console.warn('[재고] 쉐어포인트 로그인 실패 → 구매요청 Apps Script 재고로 대신합니다:', e);
-    if(t) toast('쉐어포인트 연결 실패 — 예전 방식(구매요청 대시보드) 재고를 씁니다\n' + t, 8000);
+    const t = window.MmsSp ? MmsSp.errorText(e) : e.message;
+    console.warn('[재고] 쉐어포인트 로그인 실패 — 재고는 갱신하지 않습니다:', e);
+    if(t) toast('쉐어포인트 연결 실패 — 이번에는 재고를 갱신하지 않습니다\n' + t, 8000);
   }
   try{
     const res = await reqFetch(url);
@@ -1829,12 +1830,9 @@ async function pullPurchaseRequests(){
     const rows = res.rows || [];
     reqSetUrl(url);                                   // 성공했을 때만 주소 기억
 
-    // ── 재고 동기화 ──
-    // 같은 Apps Script에 ?erp=data 로 호출하면 품목코드별 ERP blob({items:{code:{s:재고, n:품명, ...}}})이 돌아온다.
-    // 두 종류의 세트를 유지한다:
-    //   stockByCode     : .s 값이 있는 품목 (실제 재고 숫자)
-    //   erpKnownCodes   : blob.items 에 등장한 모든 품목코드 (품목등록은 됐지만 재고가 비어있는 경우 포함)
-    // 이렇게 하면 "ERP에 등록은 되어 있는데 재고가 비어있는 품목"은 0으로, 아예 ERP에 없는 품목만 '미등록'으로 구분 가능.
+    // ── 재고 동기화 ── (쉐어포인트 MMS 의 두 회사 재고현황 · 품목정보)
+    //   stockByCode   : 품목코드 → 두 회사 재고 합계
+    //   erpKnownCodes : 이카운트에 등록된 품목코드 전체 — 재고가 없으면 0, 여기 없으면 '미등록'
     const stockByCode = {};
     const erpKnownCodes = new Set();
     let spStockAt = '';
@@ -1846,40 +1844,9 @@ async function pullPurchaseRequests(){
         spStockAt = sp.at;
         console.log('[재고] 쉐어포인트 재고:', Object.keys(sp.stock).length, '품목 · 등록 품목', sp.known.size, '· 기준', sp.at);
       }catch(e){
-        console.warn('[재고] 쉐어포인트 재고 실패 → 구매요청 Apps Script 재고로 대신합니다:', e);
-        toast('쉐어포인트 재고를 못 읽었습니다 — 예전 방식 재고를 씁니다\n' + MmsSp.errorText(e), 8000);
+        console.warn('[재고] 쉐어포인트 재고 실패 — 재고는 갱신하지 않습니다:', e);
+        toast('쉐어포인트 재고를 못 읽었습니다 — 이번에는 재고를 갱신하지 않습니다\n' + MmsSp.errorText(e), 8000);
       }
-    }
-    const erpUrl = url + (url.indexOf('?')>=0 ? '&' : '?') + 'erp=data';
-    if(!spStockAt) console.log('[재고] ?erp=data 호출 →', erpUrl);
-    if(!spStockAt) try{
-      const erp = await reqFetch(erpUrl);
-      console.log('[재고] ?erp=data 응답:', erp);
-      // erp blob: {updatedAt, items:{code:{s,...}}}  — 또는 {ok:true, erp:{items:{...}}} 로 래핑돼서 올 수 있음
-      const blob = (erp && erp.items) ? erp : (erp && erp.erp && erp.erp.items ? erp.erp : null);
-      if(blob && blob.items){
-        const sampleCodes = Object.keys(blob.items).slice(0,5);
-        console.log('[재고] ERP blob 품목 수:', Object.keys(blob.items).length, '· 첫 5개 코드:', sampleCodes, '· 샘플:', blob.items[sampleCodes[0]]);
-        for(const code in blob.items){
-          erpKnownCodes.add(code);
-          const v = blob.items[code] && blob.items[code].s;
-          if(v != null && v !== '' && !isNaN(parseFloat(v))) stockByCode[code] = parseFloat(v);
-        }
-        console.log('[재고] stockByCode 집계된 품목 수:', Object.keys(stockByCode).length, '· ERP 등록 품목 전체:', erpKnownCodes.size);
-      }else{
-        console.warn('[재고] ERP 응답에 items 필드가 없음 — 구매요청 Apps Script에 ERP 자료가 아직 세팅 안 된 것 같습니다. 구매요청 대시보드에서 "📦 ERP 데이터" 메뉴를 먼저 설정해주세요.');
-        toast('ERP 재고 데이터가 비어 있습니다 — 구매요청 대시보드에서 ERP 자료부터 세팅해주세요 (F12 콘솔 참고)', 7000);
-      }
-      // 보강: 혹시 rows 자체에 다른 이름으로 재고 필드가 들어왔다면 추가로 흡수(ERP blob 못 받은 백업 경로)
-      rows.forEach(r => {
-        const code = r && r.code;
-        if(!code || stockByCode[code] != null) return;
-        const st = extractStock(r);
-        if(st != null){ stockByCode[code] = st; erpKnownCodes.add(code); }
-      });
-    }catch(e){
-      console.warn('[재고] ?erp=data 호출 실패:', e && e.message);
-      toast('ERP 재고 호출 실패: ' + (e && e.message || '알 수 없음') + ' (F12 콘솔 확인)', 7000);
     }
     // 매칭 진단: ERP에 등록된 품목·재고가 있는 품목·아예 없는 품목을 구분해서 로그로 보여준다.
     if(erpKnownCodes.size){
@@ -1899,8 +1866,9 @@ async function pullPurchaseRequests(){
     //   '' / undefined : 조회조차 안 된 상태 → 공란
     let stockUpdated = 0;
     const haveAny = erpKnownCodes.size > 0;
-    const stockSrc = spStockAt ? '재고: 쉐어포인트 ' + spStockAt + ' 기준' : '재고: 구매요청 대시보드 기준';
-    showStockSrc(stockSrc, true);
+    const stockSrc = spStockAt ? '재고: 쉐어포인트 ' + spStockAt + ' 기준' : '재고: 갱신 못 함 (쉐어포인트 연결 확인)';
+    if(spStockAt) showStockSrc(stockSrc, true);
+    else{ const el = document.getElementById('stockSrcNote'); if(el){ el.textContent = stockSrc; el.classList.remove('sp'); } }
     if(haveAny){
       const applyStock = list => list.forEach(p => {
         if(!p.itemCode) return;
