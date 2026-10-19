@@ -117,6 +117,11 @@
   .kpi-lbl{font-size:12.5px; color:var(--console-text-dim); margin-top:3px; font-weight:600;}
 
   .donut-wrap{display:flex; align-items:center; gap:16px;}
+  .fx-head{display:flex; justify-content:space-between; align-items:flex-start; gap:8px; flex-wrap:wrap}
+  .fx-head .clabel{margin-bottom:0}
+  .fx-link{font-size:12px; font-weight:700; color:var(--console-accent); text-decoration:none;
+    padding:3px 10px; border:1px solid var(--console-line); border-radius:14px; background:var(--console-panel); white-space:nowrap}
+  .fx-link:hover{background:#e2edef}
   .donut-wrap .dnum{font-family:var(--sans); font-size:20px; font-weight:700; color:var(--console-text);}
   .donut-wrap .dlbl{font-size:12px; color:var(--console-text-dim); font-weight:600;}
 
@@ -726,7 +731,9 @@
         </div>
 
         <div class="cpanel col-4" style="grid-row: span 2;">
-          <span class="clabel">기간별 금액 조회 (환율 환산)</span>
+          <div class="fx-head"><span class="clabel">기간별 금액 조회 (환율 환산)</span>
+          <a class="fx-link" href="http://www.smbs.biz/ExRate/MonAvgStdExRate.jsp" target="_blank" rel="noopener"
+             title="서울외국환중개 — 월평균 매매기준율 (새 창)">서울외국환중개 월평균 환율 ↗</a></div>
           <div class="fx-row">
             <div class="fx-field"><label>USD → KRW</label><input type="number" id="fxKrw" step="0.01"></div>
             <div class="fx-field"><label>CNY(위안) → KRW</label><input type="number" id="fxCny" step="0.01" placeholder="예: 190"></div>
