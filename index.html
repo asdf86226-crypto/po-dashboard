@@ -609,6 +609,36 @@
   body.viewer #memoTextarea:disabled{
     opacity:1; -webkit-text-fill-color:var(--ink); color:var(--ink); background:var(--paper-2); cursor:default;
   }
+  /* ===== 입고 문제 기록 ===== */
+  .qi-count{display:inline-block; min-width:18px; padding:0 6px; margin-left:5px; border-radius:9px; background:#c2410c; color:#fff; font-size:11px; font-weight:800; line-height:18px; text-align:center}
+  .qi-hint{font-size:12.5px; color:var(--ink-soft); margin:-6px 0 14px; line-height:1.6}
+  .qi-chips{display:flex; gap:6px; flex-wrap:wrap}
+  .qi-chip{padding:6px 12px; border:1px solid var(--line); border-radius:16px; background:var(--paper-2); font-size:12.5px; font-weight:700; color:var(--ink-soft); cursor:pointer}
+  .qi-chip.on{background:var(--navy); color:#fff; border-color:var(--navy)}
+  .qi-st{display:inline-block; padding:2px 8px; border-radius:10px; font-size:11.5px; font-weight:800; white-space:nowrap}
+  .qi-st.open{background:#fde8dc; color:#b8562f}
+  .qi-st.applied{background:#e0eef1; color:#2a6573}
+  .qi-st.done{background:#e3f1e8; color:#2f7d5c}
+  .qi-txt{white-space:pre-wrap; min-width:200px; max-width:380px; font-size:13px; line-height:1.5}
+  .qi-acts{display:flex; gap:4px; flex-wrap:wrap}
+  .qi-acts button{padding:4px 9px; font-size:12px; border:1px solid var(--line); background:var(--paper-2); border-radius:5px; cursor:pointer; white-space:nowrap}
+  .qi-acts button:hover{background:#eef2f4}
+  .qi-banner{display:none; margin:-4px 0 14px; padding:10px 12px; border:1px solid #f0b48f; background:#fff4ec; border-radius:8px; font-size:12.5px; line-height:1.55}
+  .qi-banner.show{display:block}
+  .qi-banner.soft{border-color:var(--line); background:var(--paper-2)}
+  .qi-banner b{color:#b8562f}
+  .qi-banner ul{margin:6px 0 4px; padding-left:18px}
+  .qi-banner .qi-links{display:flex; gap:10px; margin-top:4px}
+  .qi-banner .qi-links a{color:var(--brass); font-weight:700; cursor:pointer; text-decoration:underline}
+  .qi-modal{z-index:70; align-items:center; justify-content:center}
+  .qi-modal .panel{height:auto; max-height:92vh; border-left:none; border-top:3px solid var(--brass); border-radius:10px; width:min(620px,96vw)}
+  .qi-alert-item{padding:10px 0; border-bottom:1px solid var(--line)}
+  .qi-alert-item:last-child{border-bottom:none}
+  .qi-alert-item .qi-meta{font-size:11.5px; color:var(--ink-soft)}
+  .qi-alert-item .qi-p{margin-top:4px; white-space:pre-wrap}
+  .qi-alert-item .qi-r{margin-top:4px; white-space:pre-wrap; color:#2a6573; font-weight:700}
+  .qi-ri{display:inline-block; margin-left:6px; padding:1px 7px; border-radius:9px; background:#fde8dc; color:#b8562f; font-size:11px; font-weight:800}
+  body.viewer .qi-edit{display:none !important}
 </style>
 </head>
 <body>
@@ -625,6 +655,7 @@
     <div class="tab active" data-view="dash">대시보드</div>
     <div class="tab" data-view="po">해외발주건</div>
     <div class="tab" data-view="domestic">국내발주건</div>
+    <div class="tab" data-view="issue">입고 문제<span class="qi-count" id="qiTabCount" style="display:none"></span></div>
     <div class="tab" data-view="poc">발주서</div>
     <div class="tab" data-view="appr">결재</div>
     <div class="tab" data-view="monthcost">월별비용</div>
@@ -786,6 +817,29 @@
   </div>
 
   <!-- ===================== 발주서 작성 ===================== -->
+  <!-- ===================== 입고 문제 기록 ===================== -->
+  <div class="view" id="view-issue">
+    <div class="view-header"><span class="vlabel">입고 문제 기록</span></div>
+    <div class="qi-hint">입고검사나 사용·조립 중에 발견한 문제를 품목코드별로 적어 두세요.
+      그 품목을 <b>다시 발주할 때</b>(새 발주 등록 · 구매요청 가져오기) 팝업으로 알려드립니다.
+      공급사에 전달했으면 <b>반영됨</b>, 다음 입고에서 고쳐진 걸 확인하면 <b>개선 확인</b>을 눌러 주세요.</div>
+    <div class="toolbar">
+      <input class="search" id="qiSearch" placeholder="품목코드 / 품명 / 공급사 / 내용 검색">
+      <div class="qi-chips" id="qiChips"></div>
+      <button class="btn brass qi-edit" id="btnQiNew" type="button">+ 입고 문제 기록</button>
+    </div>
+    <div class="table-wrap">
+      <table id="qiTable">
+        <thead><tr><th>발견일</th><th>품목코드</th><th>품명</th><th>공급사</th><th>발견 단계</th><th>문제점</th><th>다음 발주 때 요청할 내용</th><th>상태</th><th class="qi-edit"></th></tr></thead>
+        <tbody id="qiTbody"></tbody>
+      </table>
+      <div class="empty-state" id="qiEmpty" style="display:none;">
+        <div class="big">기록된 입고 문제가 없습니다</div>
+        <div>‘+ 입고 문제 기록’으로 품목코드와 문제점을 적어 두세요.</div>
+      </div>
+    </div>
+  </div>
+
   <div class="view" id="view-poc">
     <div class="view-header"><span class="vlabel">발주서 작성</span></div>
     <div class="cal-hint">아직 발주 전인 "요청등록" 단계 건을 해외·국내 모두 모아서 보여줍니다. 공급사를 지정해 필요한 품목만 골라 발주서로 뽑아보세요.</div>
@@ -955,6 +1009,7 @@
             <div class="fgroup"><label>품목코드</label><input type="text" name="itemCode"></div>
             <div class="fgroup"><label>수량</label><input type="number" name="qty" min="0"></div>
           </div>
+          <div class="qi-banner" id="poQiBanner"></div>
           <div class="fgroup">
             <label>품명</label>
             <input type="text" name="itemName">
@@ -1126,6 +1181,7 @@
             <div class="fgroup"><label>품목코드</label><input type="text" name="itemCode"></div>
             <div class="fgroup"><label>수량</label><input type="number" name="qty" min="0"></div>
           </div>
+          <div class="qi-banner" id="domQiBanner"></div>
           <div class="fgroup"><label>품명</label><input type="text" name="itemName"></div>
           <div class="frow">
             <div class="fgroup"><label>납기요청일</label><input type="date" name="dueDate"></div>
@@ -1301,6 +1357,50 @@
   </div>
 </div>
 
+<!-- 입고 문제 기록/수정 -->
+<div class="overlay qi-modal" id="qiEditOverlay">
+  <div class="panel">
+    <div class="panel-head"><h2 id="qiEditTitle">입고 문제 기록</h2><button class="panel-close" id="qiEditClose" type="button">&times;</button></div>
+    <div class="panel-body">
+      <form id="qiForm" autocomplete="off">
+        <div class="frow">
+          <div class="fgroup"><label>품목코드 *</label><input type="text" name="code" list="qiCodeList" required></div>
+          <div class="fgroup"><label>발견일</label><input type="date" name="foundDate"></div>
+        </div>
+        <datalist id="qiCodeList"></datalist>
+        <div class="fgroup"><label>품명</label><input type="text" name="name"></div>
+        <div class="frow">
+          <div class="fgroup"><label>공급사</label><input type="text" name="supplier" list="qiSuppList"></div>
+          <div class="fgroup"><label>발견 단계</label><select name="stage"><option>입고검사</option><option>사용·조립 중</option><option>기타</option></select></div>
+        </div>
+        <datalist id="qiSuppList"></datalist>
+        <div class="fgroup"><label>문제점 *</label><textarea name="problem" rows="3" required placeholder="예: 나사산 불량 20개 중 3개, 도금 벗겨짐"></textarea></div>
+        <div class="fgroup"><label>다음 발주 때 요청할 내용</label><textarea name="request" rows="3" placeholder="예: 나사산 게이지 검사 후 출하, 도금 두께 8㎛ 이상"></textarea></div>
+        <div class="panel-actions">
+          <button type="button" class="btn ghost" id="qiDelete" style="margin-right:auto; display:none;">삭제</button>
+          <button type="button" class="btn ghost" id="qiEditCancel">취소</button>
+          <button type="submit" class="btn brass">저장</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- 다시 발주할 때 뜨는 알림 -->
+<div class="overlay qi-modal" id="qiAlertOverlay">
+  <div class="panel">
+    <div class="panel-head"><h2>⚠ 지난 입고 때 문제가 있었던 품목입니다</h2><button class="panel-close" id="qiAlertClose" type="button">&times;</button></div>
+    <div class="panel-body">
+      <div style="font-size:12.5px; color:var(--ink-soft); margin-bottom:6px; line-height:1.6;">이번 발주서나 공급사 연락에 아래 요청 내용을 넣어 주세요.</div>
+      <div id="qiAlertBody" style="font-size:13px;"></div>
+      <div class="panel-actions">
+        <button type="button" class="btn ghost" id="qiAlertLater">다음에 (계속 알림)</button>
+        <button type="button" class="btn brass" id="qiAlertApplied">이번 발주에 반영했어요</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <script src="mms-sharepoint.js"></script>
@@ -1434,6 +1534,7 @@ async function loadData(){
     suppliers      = Array.isArray(SHARED.suppliers)      ? SHARED.suppliers      : DEFAULT_SUPPLIERS.slice();
     if(SHARED.fxRates) fxRates = SHARED.fxRates;
     if(typeof SHARED.memoNote === 'string') memoNote = SHARED.memoNote;
+    qualityIssues  = Array.isArray(SHARED.qualityIssues)  ? SHARED.qualityIssues  : [];
     hasStorage = false; // 저장 함수들은 모두 no-op
     document.getElementById('fxKrw').value = fxRates.krw;
     document.getElementById('fxCny').value = fxRates.cny;
@@ -1489,6 +1590,10 @@ async function loadData(){
       const r = await window.storage.get('memoNote', false);
       memoNote = r ? r.value : '';
     }catch(e){ memoNote = ''; }
+    try{
+      const r = await window.storage.get('qualityIssues', false);
+      qualityIssues = r ? JSON.parse(r.value) : [];
+    }catch(e){ qualityIssues = []; }
     try{
       const r = await window.storage.get('teamsWebhookUrl', false);
       teamsWebhookUrl = r ? r.value : '';
@@ -1667,6 +1772,7 @@ function showReqImportDialog(plan){
       const hint = x.g ? (x.g.byBase ? '비슷한 품목코드 이력' : '발주 이력') : '처음 보는 품목';
       return '<div class="ri-row" data-i="' + i + '" data-new="' + (x.g ? '0' : '1') + '" style="display:flex; flex-wrap:wrap; align-items:center; gap:8px; padding:10px 2px; border-bottom:1px solid var(--line);">'
         + '<div style="flex:1 1 220px; min-width:0;"><b>' + esc(x.r.code || '-') + '</b> <span style="color:var(--ink-soft);">· ' + esc(x.r.qty || '') + '개</span>'
+        + qiImportBadge(x.r.code)
         + '<div style="font-size:11px; color:var(--ink-soft);">' + esc(x.r.itemName || '') + ' · <span style="color:' + (x.g ? '#0d9488' : '#b45309') + ';">' + hint + '</span></div></div>'
         + '<select class="ri-kind" style="flex:0 0 auto; width:auto; padding:6px 8px;"><option value="po"' + (kind === 'po' ? ' selected' : '') + '>해외</option><option value="dom"' + (kind === 'dom' ? ' selected' : '') + '>국내</option></select>'
         + '<select class="ri-sup" style="flex:0 0 170px; width:170px; padding:6px 8px;">' + supOptions(kind, x.g ? x.g.supplier : '') + '</select>'
@@ -1912,6 +2018,7 @@ async function pullPurchaseRequests(){
     await savePos();
     await saveDomesticPos();
     render();
+    qiAlertForNew(chosen.map(({r, kind}) => ({code:r.code, name:r.itemName, kind})));
     toast('해외 ' + nOv + '건 · 국내 ' + nDom + '건 등록' + (nNoSup ? ' (공급사 미지정 ' + nNoSup + '건)' : '') + (stockUpdated ? ' · 재고 ' + stockUpdated + '건 갱신' : '') + '\n' + stockSrc, 7000);
   }catch(err){
     console.error(err);
@@ -1974,7 +2081,7 @@ function renderMemoPreview(){
 }
 
 function exportData(){
-  const payload = {exportedAt: new Date().toISOString(), pos, domesticPos, approvalBatches, suppliers, fxRates, memoNote};
+  const payload = {exportedAt: new Date().toISOString(), pos, domesticPos, approvalBatches, suppliers, fxRates, memoNote, qualityIssues};
   const blob = new Blob([JSON.stringify(payload, null, 2)], {type:'application/json'});
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -2002,12 +2109,14 @@ function importData(file){
       suppliers = payload.suppliers;
       if(payload.fxRates) fxRates = payload.fxRates;
       if(typeof payload.memoNote === 'string') memoNote = payload.memoNote;
+      if(Array.isArray(payload.qualityIssues)) qualityIssues = payload.qualityIssues;   // 예전 백업에는 없다 — 그때는 그대로 둔다
       await savePos();
       await saveDomesticPos();
       await saveApprovalBatches();
       await saveSuppliers();
       await saveFxRates();
       await saveMemoNote();
+      await saveQualityIssues();
       document.getElementById('fxKrw').value = fxRates.krw;
       document.getElementById('fxCny').value = fxRates.cny;
       renderMemoPreview();
@@ -2608,6 +2717,7 @@ function render(){
   renderPocSupplierSelect();
   renderPocResult();
   renderApprView();
+  renderQualityIssues();
 }
 
 function renderDashboard(){
@@ -3536,6 +3646,7 @@ function openPoPanel(id){
   syncShareDisplays();
   refreshErpRow('po', id);       // ERP 자동입력 섹션 상태 갱신
   refreshImportRow(id);          // 수입품 입고처리(3건) 섹션
+  qiRenderBanner('po');          // 이 품목의 입고 문제 기록
   if(id) highlightRows([id]); else clearRowHighlights();
   poOverlay.classList.add('active');
 }
@@ -3893,6 +4004,7 @@ document.getElementById('poCancelBtn').addEventListener('click', closePoPanel);
 poForm.addEventListener('submit', async (e)=>{
   e.preventDefault();
   const saveBtn = poForm.querySelector('button[type="submit"]');
+  let newForQi = null;
   try{
     saveBtn.disabled = true;
     saveBtn.textContent = '저장 중...';
@@ -3916,11 +4028,13 @@ poForm.addEventListener('submit', async (e)=>{
     }else{
       data.id = 'po_' + Date.now();
       pos.push(data);
+      newForQi = [{code:data.itemCode, name:data.itemName, kind:'po'}];
     }
     await savePos();
     render();
     closePoPanel();
     toast('저장되었습니다');
+    if(newForQi) qiAlertForNew(newForQi);
   }catch(err){
     console.error(err);
     toast('저장 중 오류가 발생했습니다: ' + (err && err.message ? err.message : '알 수 없는 오류'));
@@ -4861,6 +4975,7 @@ function openDomPanel(id){
   updateDomBalanceInputsLock();
   syncDomShareDisplays();
   refreshErpRow('dom', id);
+  qiRenderBanner('dom');
   if(id) highlightRows([id]); else clearRowHighlights();
   domOverlay.classList.add('active');
 }
@@ -4936,6 +5051,7 @@ domForm.addEventListener('input', (e)=>{
 domForm.addEventListener('submit', async (e)=>{
   e.preventDefault();
   const saveBtn = domForm.querySelector('button[type="submit"]');
+  let newForQi = null;
   try{
     saveBtn.disabled = true;
     saveBtn.textContent = '저장 중...';
@@ -4954,11 +5070,13 @@ domForm.addEventListener('submit', async (e)=>{
     }else{
       data.id = 'dom_' + Date.now();
       domesticPos.push(data);
+      newForQi = [{code:data.itemCode, name:data.itemName, kind:'dom'}];
     }
     await saveDomesticPos();
     closeDomPanel();
     render();
     toast('저장되었습니다');
+    if(newForQi) qiAlertForNew(newForQi);
   }catch(err){
     console.error(err);
     toast('저장 중 오류가 발생했습니다: ' + (err && err.message ? err.message : '알 수 없는 오류'));
@@ -6140,6 +6258,216 @@ document.addEventListener('click', async (e) => {
   render();
   toast('입고처리 전송기록을 지웠습니다');
 });
+
+/* ===================== 입고 문제 기록 =====================
+ * 입고검사·사용(조립) 중에 발견한 문제를 품목코드별로 적어 두고, 그 품목을 다시 발주할 때 알린다.
+ * 상태: open(미반영 — 다음 발주 때 알림) → applied(발주에 반영 — 다음 입고 때 확인) → done(개선 확인).
+ * 품목코드는 그대로 비교한다 — 717062.0 과 717062 는 이카운트에서 다른 품목이다. */
+let qualityIssues = [];
+let qiFilter = 'open', qiEditingId = null;
+const QI_ST = {open:'미반영', applied:'반영됨 · 입고 때 확인', done:'개선 확인'};
+async function saveQualityIssues(){
+  if(!hasStorage) return;
+  try{ await window.storage.set('qualityIssues', JSON.stringify(qualityIssues), false); }catch(e){ console.error(e); }
+}
+function qiEsc(v){ return String(v == null ? '' : v).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function qiToday(){ const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0'); }
+function qiCode(c){ return String(c == null ? '' : c).trim(); }
+function qiFor(code, statuses){
+  const c = qiCode(code); if(!c) return [];
+  return qualityIssues.filter(x => qiCode(x.code) === c && (!statuses || statuses.includes(x.status)));
+}
+// 같은 품목코드의 가장 최근 발주에서 품명·공급사를 가져온다
+function qiLatestPo(code){
+  const c = qiCode(code); if(!c) return null;
+  const all = [].concat(pos, domesticPos).filter(p => qiCode(p.itemCode) === c);
+  all.sort((a,b) => String(b.reqDate||'').localeCompare(String(a.reqDate||'')));
+  return all[0] || null;
+}
+function renderQualityIssues(){
+  const nOpen = qualityIssues.filter(x => x.status === 'open').length;
+  const cnt = document.getElementById('qiTabCount');
+  if(cnt){ cnt.textContent = nOpen; cnt.style.display = nOpen ? '' : 'none'; }
+  const tb = document.getElementById('qiTbody'); if(!tb) return;
+  const by = st => qualityIssues.filter(x => x.status === st).length;
+  document.getElementById('qiChips').innerHTML = [['open','미반영'],['applied','반영됨'],['done','개선 확인'],['all','전체']]
+    .map(([k,l]) => '<span class="qi-chip' + (qiFilter === k ? ' on' : '') + '" data-f="' + k + '">' + l + ' ' + (k === 'all' ? qualityIssues.length : by(k)) + '</span>').join('');
+  const q = (document.getElementById('qiSearch').value || '').trim().toLowerCase();
+  const rows = qualityIssues
+    .filter(x => qiFilter === 'all' || x.status === qiFilter)
+    .filter(x => !q || [x.code, x.name, x.supplier, x.problem, x.request, x.stage].join(' ').toLowerCase().includes(q))
+    .sort((a,b) => String(b.foundDate||'').localeCompare(String(a.foundDate||'')) || String(b.id).localeCompare(String(a.id)));
+  tb.innerHTML = rows.map(x => {
+    const acts = x.status === 'open'
+        ? '<button data-a="applied">반영됨</button>'
+        : x.status === 'applied'
+          ? '<button data-a="done">개선 확인</button><button data-a="open">미반영으로</button>'
+          : '<button data-a="open">다시 열기</button>';
+    const sub = x.status === 'applied' && x.appliedTo ? '<div style="font-size:11px; color:var(--ink-soft); margin-top:3px;">' + qiEsc(x.appliedTo) + '</div>'
+              : x.status === 'done' && x.doneAt ? '<div style="font-size:11px; color:var(--ink-soft); margin-top:3px;">' + qiEsc(x.doneAt) + ' 확인</div>' : '';
+    return '<tr data-id="' + qiEsc(x.id) + '">'
+      + '<td class="mono">' + qiEsc(x.foundDate || '-') + '</td>'
+      + '<td class="mono"><b>' + qiEsc(x.code) + '</b></td>'
+      + '<td>' + qiEsc(x.name || '-') + '</td>'
+      + '<td>' + qiEsc(x.supplier || '-') + '</td>'
+      + '<td>' + qiEsc(x.stage || '-') + '</td>'
+      + '<td><div class="qi-txt">' + qiEsc(x.problem) + '</div></td>'
+      + '<td><div class="qi-txt">' + qiEsc(x.request || '-') + '</div></td>'
+      + '<td><span class="qi-st ' + x.status + '">' + QI_ST[x.status] + '</span>' + sub + '</td>'
+      + '<td class="qi-edit"><div class="qi-acts">' + acts + '<button data-a="edit">수정</button></div></td>'
+      + '</tr>';
+  }).join('');
+  document.getElementById('qiEmpty').style.display = rows.length ? 'none' : '';
+  document.getElementById('qiEmpty').querySelector('.big').textContent = qualityIssues.length ? '이 조건에 맞는 기록이 없습니다' : '기록된 입고 문제가 없습니다';
+}
+async function qiSetStatus(id, st, appliedTo){
+  const x = qualityIssues.find(v => v.id === id); if(!x) return;
+  x.status = st;
+  if(st === 'applied'){ x.appliedAt = qiToday(); x.appliedTo = appliedTo || (qiToday() + ' 발주에 반영'); }
+  if(st === 'done') x.doneAt = qiToday();
+  if(st === 'open'){ delete x.appliedAt; delete x.appliedTo; delete x.doneAt; }
+  await saveQualityIssues();
+  renderQualityIssues();
+}
+function qiOpenEditor(id, preset){
+  if(typeof VIEWER !== 'undefined' && VIEWER) return;
+  const f = document.getElementById('qiForm');
+  f.reset();
+  qiEditingId = id || null;
+  const x = id ? qualityIssues.find(v => v.id === id) : null;
+  const v = x || Object.assign({foundDate: qiToday(), stage:'입고검사'}, preset || {});
+  ['code','name','supplier','stage','foundDate','problem','request'].forEach(k => { if(f.elements[k] && v[k] != null) f.elements[k].value = v[k]; });
+  document.getElementById('qiEditTitle').textContent = x ? '입고 문제 수정' : '입고 문제 기록';
+  document.getElementById('qiDelete').style.display = x ? '' : 'none';
+  const codes = [...new Set([].concat(pos, domesticPos).map(p => qiCode(p.itemCode)).filter(Boolean))].slice(0, 3000);
+  document.getElementById('qiCodeList').innerHTML = codes.map(c => '<option value="' + qiEsc(c) + '">').join('');
+  document.getElementById('qiSuppList').innerHTML = suppliers.map(s => '<option value="' + qiEsc(s.name) + '">').join('');
+  document.getElementById('qiEditOverlay').classList.add('active');
+  setTimeout(() => (f.elements[v.code ? 'problem' : 'code']).focus(), 50);
+}
+function qiCloseEditor(){ document.getElementById('qiEditOverlay').classList.remove('active'); qiEditingId = null; }
+// 발주 등록 창: 품목코드에 입고 문제가 있으면 품목코드 아래에 바로 보여준다
+function qiRenderBanner(kind){
+  const form = kind === 'dom' ? domForm : poForm;
+  const box = document.getElementById(kind === 'dom' ? 'domQiBanner' : 'poQiBanner');
+  if(!form || !box) return;
+  const code = qiCode(form.elements['itemCode'].value);
+  const open = qiFor(code, ['open']), applied = qiFor(code, ['applied']);
+  if(!code || (!open.length && !applied.length)){
+    box.className = 'qi-banner';
+    box.innerHTML = '';
+    if(code && !(typeof VIEWER !== 'undefined' && VIEWER)){
+      box.className = 'qi-banner show soft qi-edit';
+      box.innerHTML = '<div class="qi-links" style="margin-top:0"><a data-qa="new">＋ 이 품목 입고 문제 기록</a></div>';
+    }
+    return;
+  }
+  const li = x => '<li>' + qiEsc(x.problem) + (x.request ? ' → <b>' + qiEsc(x.request) + '</b>' : '') + ' <span style="color:var(--ink-soft)">(' + qiEsc(x.foundDate || '') + ')</span></li>';
+  box.className = 'qi-banner show' + (open.length ? '' : ' soft');
+  box.innerHTML = (open.length ? '<b>⚠ 이 품목은 지난 입고 때 문제가 ' + open.length + '건 있었습니다 — 이번 발주에 요청해 주세요</b><ul>' + open.map(li).join('') + '</ul>' : '')
+    + (applied.length ? '<div style="color:#2a6573; font-weight:700;">반영한 요청 ' + applied.length + '건 — 이번 입고 때 고쳐졌는지 확인해 주세요</div><ul>' + applied.map(li).join('') + '</ul>' : '')
+    + '<div class="qi-links qi-edit"><a data-qa="view">입고 문제 탭에서 보기</a><a data-qa="new">＋ 문제 추가 기록</a></div>';
+}
+['po','dom'].forEach(kind => {
+  const box = document.getElementById(kind === 'dom' ? 'domQiBanner' : 'poQiBanner');
+  const form = kind === 'dom' ? domForm : poForm;
+  if(!box || !form) return;
+  box.addEventListener('click', e => {
+    const a = e.target.closest('[data-qa]'); if(!a) return;
+    const code = qiCode(form.elements['itemCode'].value);
+    if(a.dataset.qa === 'view'){
+      if(kind === 'dom') closeDomPanel(); else closePoPanel();
+      document.getElementById('qiSearch').value = code; qiFilter = 'all';
+      switchToView('issue'); renderQualityIssues();
+    }else{
+      const sel = form.elements['supplier'];
+      qiOpenEditor(null, {code, name: form.elements['itemName'].value, supplier: sel ? sel.value : '',
+                          stage: form.elements['warehouseDate'] && form.elements['warehouseDate'].value ? '입고검사' : '사용·조립 중'});
+    }
+  });
+  form.elements['itemCode'].addEventListener('input', () => qiRenderBanner(kind));
+});
+// 이번에 등록한 발주 중 미반영 문제가 있는 품목을 모아 팝업으로 알린다
+let qiAlertPending = null;
+function qiAlertForNew(list){
+  const seen = new Set(), groups = [];
+  (list || []).forEach(n => {
+    const c = qiCode(n.code); if(!c || seen.has(c)) return; seen.add(c);
+    const open = qiFor(c, ['open']); if(open.length) groups.push({code:c, name:n.name, kind:n.kind, open});
+  });
+  if(!groups.length) return;
+  qiAlertPending = groups;
+  document.getElementById('qiAlertBody').innerHTML = groups.map(g =>
+    '<div style="margin-top:10px;"><b class="mono">' + qiEsc(g.code) + '</b> <span style="color:var(--ink-soft)">' + qiEsc(g.name || g.open[0].name || '') + ' · ' + (g.kind === 'dom' ? '국내' : '해외') + '발주</span></div>'
+    + g.open.map(x => '<div class="qi-alert-item"><div class="qi-meta">' + qiEsc(x.foundDate || '') + ' · ' + qiEsc(x.stage || '') + (x.supplier ? ' · ' + qiEsc(x.supplier) : '') + '</div>'
+      + '<div class="qi-p">' + qiEsc(x.problem) + '</div>' + (x.request ? '<div class="qi-r">→ ' + qiEsc(x.request) + '</div>' : '') + '</div>').join('')
+  ).join('');
+  document.getElementById('qiAlertOverlay').classList.add('active');
+}
+function qiCloseAlert(){ document.getElementById('qiAlertOverlay').classList.remove('active'); qiAlertPending = null; }
+document.getElementById('qiAlertApplied').addEventListener('click', async () => {
+  const groups = qiAlertPending || [];
+  groups.forEach(g => g.open.forEach(x => {
+    x.status = 'applied'; x.appliedAt = qiToday();
+    x.appliedTo = qiToday() + ' ' + (g.kind === 'dom' ? '국내' : '해외') + '발주에 반영';
+  }));
+  await saveQualityIssues();
+  renderQualityIssues();
+  qiCloseAlert();
+  toast('반영됨으로 표시했습니다 — 다음 입고 때 고쳐졌는지 확인해 주세요');
+});
+document.getElementById('qiAlertLater').addEventListener('click', qiCloseAlert);
+document.getElementById('qiAlertClose').addEventListener('click', qiCloseAlert);
+document.getElementById('btnQiNew').addEventListener('click', () => qiOpenEditor(null));
+document.getElementById('qiEditClose').addEventListener('click', qiCloseEditor);
+document.getElementById('qiEditCancel').addEventListener('click', qiCloseEditor);
+document.getElementById('qiSearch').addEventListener('input', renderQualityIssues);
+document.getElementById('qiChips').addEventListener('click', e => {
+  const c = e.target.closest('[data-f]'); if(!c) return;
+  qiFilter = c.dataset.f; renderQualityIssues();
+});
+document.getElementById('qiTbody').addEventListener('click', e => {
+  const b = e.target.closest('button[data-a]'); if(!b) return;
+  const id = b.closest('tr').dataset.id;
+  if(b.dataset.a === 'edit') qiOpenEditor(id); else qiSetStatus(id, b.dataset.a);
+});
+// 품목코드를 넣으면 최근 발주에서 품명·공급사를 채운다 (비어 있을 때만)
+document.getElementById('qiForm').elements['code'].addEventListener('change', e => {
+  const f = e.target.form, p = qiLatestPo(e.target.value);
+  if(!p) return;
+  if(!f.elements['name'].value) f.elements['name'].value = p.itemName || '';
+  if(!f.elements['supplier'].value) f.elements['supplier'].value = p.supplier || '';
+});
+document.getElementById('qiForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  const f = e.target, v = {};
+  ['code','name','supplier','stage','foundDate','problem','request'].forEach(k => v[k] = (f.elements[k].value || '').trim());
+  if(!v.code || !v.problem){ toast('품목코드와 문제점을 입력해 주세요'); return; }
+  if(qiEditingId){
+    const x = qualityIssues.find(i => i.id === qiEditingId);
+    if(x) Object.assign(x, v);
+  }else{
+    qualityIssues.push(Object.assign({id:'qi_' + Date.now() + '_' + Math.random().toString(36).slice(2,6), status:'open', createdAt:new Date().toISOString()}, v));
+  }
+  await saveQualityIssues();
+  qiCloseEditor();
+  renderQualityIssues();
+  qiRenderBanner('po'); qiRenderBanner('dom');
+  toast('저장했습니다 — 이 품목을 다시 발주하면 알려드립니다');
+});
+document.getElementById('qiDelete').addEventListener('click', async () => {
+  if(!qiEditingId || !confirm('이 입고 문제 기록을 삭제할까요?')) return;
+  qualityIssues = qualityIssues.filter(x => x.id !== qiEditingId);
+  await saveQualityIssues();
+  qiCloseEditor();
+  renderQualityIssues();
+  qiRenderBanner('po'); qiRenderBanner('dom');
+});
+// 구매요청 가져오기 창: 입고 문제가 있는 품목에 표시
+function qiImportBadge(code){
+  const n = qiFor(code, ['open']).length;
+  return n ? '<span class="qi-ri" title="지난 입고 때 문제가 있었던 품목 — 등록하면 내용을 보여드립니다">⚠ 입고 문제 ' + n + '건</span>' : '';
+}
 
 /* ---------------- Tabs ---------------- */
 function switchToView(name){
