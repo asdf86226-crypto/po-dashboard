@@ -639,6 +639,16 @@
   .qi-alert-item .qi-r{margin-top:4px; white-space:pre-wrap; color:#2a6573; font-weight:700}
   .qi-ri{display:inline-block; margin-left:6px; padding:1px 7px; border-radius:9px; background:#fde8dc; color:#b8562f; font-size:11px; font-weight:800}
   body.viewer .qi-edit{display:none !important}
+  .qi-drop{border:2px dashed var(--line); border-radius:8px; padding:12px; text-align:center; font-size:12.5px; color:var(--ink-soft); background:var(--paper-2); cursor:pointer}
+  .qi-drop.over{border-color:var(--brass); background:#eef6f7}
+  .qi-thumbs{display:flex; gap:8px; flex-wrap:wrap; margin-top:8px}
+  .qi-thumb{position:relative; width:84px; height:84px; border:1px solid var(--line); border-radius:6px; overflow:hidden; background:#fff}
+  .qi-thumb img{width:100%; height:100%; object-fit:cover; cursor:zoom-in; display:block}
+  .qi-thumb button{position:absolute; top:2px; right:2px; width:20px; height:20px; border:none; border-radius:10px; background:rgba(0,0,0,.6); color:#fff; font-size:13px; line-height:20px; padding:0; cursor:pointer}
+  .qi-mini{display:flex; gap:4px; flex-wrap:wrap; margin-top:6px}
+  .qi-mini img{width:44px; height:44px; object-fit:cover; border:1px solid var(--line); border-radius:4px; cursor:zoom-in; background:#fff}
+  .qi-lightbox{z-index:90; align-items:center; justify-content:center; background:rgba(10,16,28,.82); cursor:zoom-out}
+  .qi-lightbox img{max-width:94vw; max-height:92vh; border-radius:6px; box-shadow:0 10px 40px rgba(0,0,0,.5); background:#fff}
 </style>
 </head>
 <body>
@@ -1376,6 +1386,11 @@
         <datalist id="qiSuppList"></datalist>
         <div class="fgroup"><label>문제점 *</label><textarea name="problem" rows="3" required placeholder="예: 나사산 불량 20개 중 3개, 도금 벗겨짐"></textarea></div>
         <div class="fgroup"><label>다음 발주 때 요청할 내용</label><textarea name="request" rows="3" placeholder="예: 나사산 게이지 검사 후 출하, 도금 두께 8㎛ 이상"></textarea></div>
+        <div class="fgroup"><label>사진</label>
+          <div class="qi-drop" id="qiDrop">📷 스크린샷은 <b>Ctrl+V</b> 로 붙여넣기 · 사진 파일은 끌어다 놓거나 여기를 눌러 선택</div>
+          <input type="file" id="qiFile" accept="image/*" multiple hidden>
+          <div class="qi-thumbs" id="qiThumbs"></div>
+        </div>
         <div class="panel-actions">
           <button type="button" class="btn ghost" id="qiDelete" style="margin-right:auto; display:none;">삭제</button>
           <button type="button" class="btn ghost" id="qiEditCancel">취소</button>
@@ -1385,6 +1400,8 @@
     </div>
   </div>
 </div>
+
+<div class="overlay qi-lightbox" id="qiLightbox"><img id="qiLightboxImg" alt=""></div>
 
 <!-- 다시 발주할 때 뜨는 알림 -->
 <div class="overlay qi-modal" id="qiAlertOverlay">
@@ -2080,8 +2097,9 @@ function renderMemoPreview(){
   el.textContent = memoNote.trim() ? memoNote : '클릭해서 메모 작성';
 }
 
-function exportData(){
+async function exportData(){
   const payload = {exportedAt: new Date().toISOString(), pos, domesticPos, approvalBatches, suppliers, fxRates, memoNote, qualityIssues};
+  try{ payload.qualityImages = await qiAllImages(); }catch(e){ console.warn('[입고 문제] 사진을 백업에 넣지 못했습니다', e); }
   const blob = new Blob([JSON.stringify(payload, null, 2)], {type:'application/json'});
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -2110,6 +2128,9 @@ function importData(file){
       if(payload.fxRates) fxRates = payload.fxRates;
       if(typeof payload.memoNote === 'string') memoNote = payload.memoNote;
       if(Array.isArray(payload.qualityIssues)) qualityIssues = payload.qualityIssues;   // 예전 백업에는 없다 — 그때는 그대로 둔다
+      if(payload.qualityImages && typeof payload.qualityImages === 'object'){
+        try{ await qiPutImages(payload.qualityImages); }catch(e){ console.warn('[입고 문제] 사진 복원 실패', e); }
+      }
       await savePos();
       await saveDomesticPos();
       await saveApprovalBatches();
@@ -6311,12 +6332,13 @@ function renderQualityIssues(){
       + '<td>' + qiEsc(x.name || '-') + '</td>'
       + '<td>' + qiEsc(x.supplier || '-') + '</td>'
       + '<td>' + qiEsc(x.stage || '-') + '</td>'
-      + '<td><div class="qi-txt">' + qiEsc(x.problem) + '</div></td>'
+      + '<td><div class="qi-txt">' + qiEsc(x.problem) + '</div>' + qiMiniThumbs(x) + '</td>'
       + '<td><div class="qi-txt">' + qiEsc(x.request || '-') + '</div></td>'
       + '<td><span class="qi-st ' + x.status + '">' + QI_ST[x.status] + '</span>' + sub + '</td>'
       + '<td class="qi-edit"><div class="qi-acts">' + acts + '<button data-a="edit">수정</button></div></td>'
       + '</tr>';
   }).join('');
+  qiHydrate(tb);
   document.getElementById('qiEmpty').style.display = rows.length ? 'none' : '';
   document.getElementById('qiEmpty').querySelector('.big').textContent = qualityIssues.length ? '이 조건에 맞는 기록이 없습니다' : '기록된 입고 문제가 없습니다';
 }
@@ -6337,6 +6359,9 @@ function qiOpenEditor(id, preset){
   const x = id ? qualityIssues.find(v => v.id === id) : null;
   const v = x || Object.assign({foundDate: qiToday(), stage:'입고검사'}, preset || {});
   ['code','name','supplier','stage','foundDate','problem','request'].forEach(k => { if(f.elements[k] && v[k] != null) f.elements[k].value = v[k]; });
+  qiDraftImgs = (x && x.imgs ? x.imgs : []).map(id => ({id}));
+  qiDraftRemoved = [];
+  qiRenderDraft();
   document.getElementById('qiEditTitle').textContent = x ? '입고 문제 수정' : '입고 문제 기록';
   document.getElementById('qiDelete').style.display = x ? '' : 'none';
   const codes = [...new Set([].concat(pos, domesticPos).map(p => qiCode(p.itemCode)).filter(Boolean))].slice(0, 3000);
@@ -6362,11 +6387,12 @@ function qiRenderBanner(kind){
     }
     return;
   }
-  const li = x => '<li>' + qiEsc(x.problem) + (x.request ? ' → <b>' + qiEsc(x.request) + '</b>' : '') + ' <span style="color:var(--ink-soft)">(' + qiEsc(x.foundDate || '') + ')</span></li>';
+  const li = x => '<li>' + qiEsc(x.problem) + (x.request ? ' → <b>' + qiEsc(x.request) + '</b>' : '') + ' <span style="color:var(--ink-soft)">(' + qiEsc(x.foundDate || '') + ')</span>' + qiMiniThumbs(x) + '</li>';
   box.className = 'qi-banner show' + (open.length ? '' : ' soft');
   box.innerHTML = (open.length ? '<b>⚠ 이 품목은 지난 입고 때 문제가 ' + open.length + '건 있었습니다 — 이번 발주에 요청해 주세요</b><ul>' + open.map(li).join('') + '</ul>' : '')
     + (applied.length ? '<div style="color:#2a6573; font-weight:700;">반영한 요청 ' + applied.length + '건 — 이번 입고 때 고쳐졌는지 확인해 주세요</div><ul>' + applied.map(li).join('') + '</ul>' : '')
     + '<div class="qi-links qi-edit"><a data-qa="view">입고 문제 탭에서 보기</a><a data-qa="new">＋ 문제 추가 기록</a></div>';
+  qiHydrate(box);
 }
 ['po','dom'].forEach(kind => {
   const box = document.getElementById(kind === 'dom' ? 'domQiBanner' : 'poQiBanner');
@@ -6400,8 +6426,9 @@ function qiAlertForNew(list){
   document.getElementById('qiAlertBody').innerHTML = groups.map(g =>
     '<div style="margin-top:10px;"><b class="mono">' + qiEsc(g.code) + '</b> <span style="color:var(--ink-soft)">' + qiEsc(g.name || g.open[0].name || '') + ' · ' + (g.kind === 'dom' ? '국내' : '해외') + '발주</span></div>'
     + g.open.map(x => '<div class="qi-alert-item"><div class="qi-meta">' + qiEsc(x.foundDate || '') + ' · ' + qiEsc(x.stage || '') + (x.supplier ? ' · ' + qiEsc(x.supplier) : '') + '</div>'
-      + '<div class="qi-p">' + qiEsc(x.problem) + '</div>' + (x.request ? '<div class="qi-r">→ ' + qiEsc(x.request) + '</div>' : '') + '</div>').join('')
+      + '<div class="qi-p">' + qiEsc(x.problem) + '</div>' + (x.request ? '<div class="qi-r">→ ' + qiEsc(x.request) + '</div>' : '') + qiMiniThumbs(x) + '</div>').join('')
   ).join('');
+  qiHydrate(document.getElementById('qiAlertBody'));
   document.getElementById('qiAlertOverlay').classList.add('active');
 }
 function qiCloseAlert(){ document.getElementById('qiAlertOverlay').classList.remove('active'); qiAlertPending = null; }
@@ -6443,6 +6470,11 @@ document.getElementById('qiForm').addEventListener('submit', async e => {
   const f = e.target, v = {};
   ['code','name','supplier','stage','foundDate','problem','request'].forEach(k => v[k] = (f.elements[k].value || '').trim());
   if(!v.code || !v.problem){ toast('품목코드와 문제점을 입력해 주세요'); return; }
+  try{
+    await qiPutImages(Object.fromEntries(qiDraftImgs.filter(d => d.data).map(d => [d.id, d.data])));
+    await qiDeleteImages(qiDraftRemoved);
+  }catch(err){ toast('사진을 저장하지 못했습니다: ' + (err && err.message || err)); return; }
+  v.imgs = qiDraftImgs.map(d => d.id);
   if(qiEditingId){
     const x = qualityIssues.find(i => i.id === qiEditingId);
     if(x) Object.assign(x, v);
@@ -6457,12 +6489,130 @@ document.getElementById('qiForm').addEventListener('submit', async e => {
 });
 document.getElementById('qiDelete').addEventListener('click', async () => {
   if(!qiEditingId || !confirm('이 입고 문제 기록을 삭제할까요?')) return;
+  const gone = qualityIssues.find(x => x.id === qiEditingId);
+  try{ await qiDeleteImages((gone && gone.imgs) || []); }catch(e){}
   qualityIssues = qualityIssues.filter(x => x.id !== qiEditingId);
   await saveQualityIssues();
   qiCloseEditor();
   renderQualityIssues();
   qiRenderBanner('po'); qiRenderBanner('dom');
 });
+/* ----- 입고 문제 사진 -----
+ * 사진은 용량이 커서 다른 발주 자료(localStorage, 약 5MB)와 따로 IndexedDB 에 둔다. 기록에는 사진 id 만 남긴다.
+ * 붙여넣을 때 긴 변 1600px · JPEG 로 줄여 한 장에 보통 100~300KB. JSON 백업에는 qualityImages 로 함께 들어간다. */
+const QI_IMG_MAX = 1600;
+let qiDraftImgs = [], qiDraftRemoved = [];
+const qiImgCache = {};
+let qiDbP = null;
+function qiDb(){
+  if(!qiDbP) qiDbP = new Promise((res, rej) => {
+    const r = indexedDB.open('po_dash_qi', 1);
+    r.onupgradeneeded = () => r.result.createObjectStore('img');
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error);
+  });
+  return qiDbP;
+}
+async function qiTx(mode, fn){
+  const db = await qiDb();
+  return new Promise((res, rej) => {
+    const t = db.transaction('img', mode), st = t.objectStore('img');
+    const out = fn(st);
+    t.oncomplete = () => res(out && 'result' in out ? out.result : undefined);
+    t.onerror = () => rej(t.error);
+  });
+}
+async function qiGetImage(id){
+  if(qiImgCache[id]) return qiImgCache[id];
+  const v = await qiTx('readonly', st => st.get(id));
+  if(v) qiImgCache[id] = v;
+  return v;
+}
+async function qiPutImages(map){
+  const ids = Object.keys(map || {}); if(!ids.length) return;
+  await qiTx('readwrite', st => { ids.forEach(id => st.put(map[id], id)); });
+  ids.forEach(id => qiImgCache[id] = map[id]);
+}
+async function qiDeleteImages(ids){
+  if(!ids || !ids.length) return;
+  await qiTx('readwrite', st => { ids.forEach(id => st.delete(id)); });
+  ids.forEach(id => delete qiImgCache[id]);
+}
+async function qiAllImages(){
+  const out = {};
+  for(const x of qualityIssues) for(const id of (x.imgs || [])){ const v = await qiGetImage(id); if(v) out[id] = v; }
+  return out;
+}
+function qiMiniThumbs(x){
+  const ids = x.imgs || []; if(!ids.length) return '';
+  return '<div class="qi-mini">' + ids.map(id => '<img data-qimg="' + qiEsc(id) + '" alt="사진">').join('') + '</div>';
+}
+// data-qimg 표시만 해 둔 그림에 실제 사진을 채운다
+function qiHydrate(root){
+  if(!root) return;
+  root.querySelectorAll('img[data-qimg]:not([src])').forEach(async img => {
+    try{ const v = await qiGetImage(img.dataset.qimg); if(v) img.src = v; else img.remove(); }catch(e){}
+  });
+}
+function qiShrink(file){
+  return new Promise((res, rej) => {
+    const url = URL.createObjectURL(file), im = new Image();
+    im.onload = () => {
+      const k = Math.min(1, QI_IMG_MAX / Math.max(im.naturalWidth, im.naturalHeight));
+      const c = document.createElement('canvas');
+      c.width = Math.round(im.naturalWidth * k); c.height = Math.round(im.naturalHeight * k);
+      const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height);   // 투명 PNG 스크린샷 배경
+      g.drawImage(im, 0, 0, c.width, c.height);
+      URL.revokeObjectURL(url);
+      res(c.toDataURL('image/jpeg', 0.85));
+    };
+    im.onerror = () => { URL.revokeObjectURL(url); rej(new Error('그림 파일을 읽지 못했습니다')); };
+    im.src = url;
+  });
+}
+async function qiAddFiles(files){
+  const imgs = [...files].filter(f => f && /^image\//.test(f.type));
+  if(!imgs.length) return;
+  for(const f of imgs){
+    try{ qiDraftImgs.push({id:'qimg_' + Date.now() + '_' + Math.random().toString(36).slice(2,7), data: await qiShrink(f)}); }
+    catch(e){ toast(e.message); }
+  }
+  qiRenderDraft();
+}
+function qiRenderDraft(){
+  const box = document.getElementById('qiThumbs');
+  box.innerHTML = qiDraftImgs.map((d, i) => '<div class="qi-thumb"><img ' + (d.data ? 'src="' + d.data + '"' : 'data-qimg="' + qiEsc(d.id) + '"') + ' alt="사진"><button type="button" data-rm="' + i + '" title="빼기">×</button></div>').join('');
+  qiHydrate(box);
+}
+document.getElementById('qiThumbs').addEventListener('click', e => {
+  const b = e.target.closest('[data-rm]'); if(!b) return;
+  const d = qiDraftImgs.splice(+b.dataset.rm, 1)[0];
+  if(d && !d.data) qiDraftRemoved.push(d.id);     // 저장돼 있던 사진은 저장할 때 지운다
+  qiRenderDraft();
+});
+const qiDrop = document.getElementById('qiDrop');
+qiDrop.addEventListener('click', () => document.getElementById('qiFile').click());
+document.getElementById('qiFile').addEventListener('change', e => { qiAddFiles(e.target.files); e.target.value = ''; });
+qiDrop.addEventListener('dragover', e => { e.preventDefault(); qiDrop.classList.add('over'); });
+qiDrop.addEventListener('dragleave', () => qiDrop.classList.remove('over'));
+qiDrop.addEventListener('drop', e => { e.preventDefault(); qiDrop.classList.remove('over'); qiAddFiles(e.dataTransfer.files); });
+// 기록 창이 열려 있을 때 Ctrl+V 로 스크린샷을 붙여넣는다 (글자 붙여넣기는 그대로 둔다)
+document.addEventListener('paste', e => {
+  if(!document.getElementById('qiEditOverlay').classList.contains('active')) return;
+  const files = [...(e.clipboardData ? e.clipboardData.items : [])].filter(it => it.kind === 'file' && /^image\//.test(it.type)).map(it => it.getAsFile());
+  if(!files.length) return;
+  e.preventDefault();
+  qiAddFiles(files);
+});
+// 사진을 누르면 크게 본다
+document.addEventListener('click', e => {
+  const img = e.target.closest('.qi-mini img, .qi-thumb img');
+  if(!img || !img.src) return;
+  document.getElementById('qiLightboxImg').src = img.src;
+  document.getElementById('qiLightbox').classList.add('active');
+});
+document.getElementById('qiLightbox').addEventListener('click', () => document.getElementById('qiLightbox').classList.remove('active'));
+
 // 구매요청 가져오기 창: 입고 문제가 있는 품목에 표시
 function qiImportBadge(code){
   const n = qiFor(code, ['open']).length;
