@@ -1305,7 +1305,7 @@
             <div class="fgroup"><label>잔금지급 예정일</label><input type="date" name="balancePlannedDate"></div>
             <div class="fgroup">
               <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:5px;">
-                <label style="margin-bottom:0;">잔금지급일</label>
+                <label style="margin-bottom:0;">잔금지급일 <span id="domBalanceAutoNote" style="display:none; font-weight:600; color:var(--console-accent); font-size:10.5px; text-transform:none;">· 예정일이 지나 자동 처리</span></label>
                 <label style="display:flex; align-items:center; gap:4px; font-weight:400; text-transform:none; color:var(--console-accent); cursor:pointer; font-size:11px; margin-bottom:0;">
                   <input type="checkbox" name="balanceDeferred" style="width:auto; margin:0;"> 입고 후 지급
                 </label>
@@ -1643,6 +1643,7 @@ async function loadData(){
         if(p.warehouseDate && !p.balancePlannedDate && !p.balanceDate && (parseFloat(p.depositPct)||0) < 100)
           p.balancePlannedDate = endOfNextMonth(p.warehouseDate);
       });
+      if(autoSettleDomBalances()) saveDomesticPos();
     }catch(e){ domesticPos = []; }
     showStockSrc(null, false);
     setTimeout(autoStockSync, 1500);   // 화면을 먼저 그린 뒤 쉐어포인트 재고를 조용히 반영
@@ -3317,6 +3318,22 @@ function toMonthCostItem(p, source){
 function endOfNextMonth(dateStr){
   const y = parseInt(dateStr.slice(0,4),10), m = parseInt(dateStr.slice(5,7),10);
   return isoDate(new Date(y, m+1, 0));   // m+1월의 0일 = 다음 달 말일
+}
+// 국내발주 잔금은 입고월 다음 달 말일로 정해져 있다. 그 잔금지급 예정일이 지나면(오늘보다 앞이면)
+// 지급된 것으로 보고 잔금지급일을 예정일로 채운다. 자동으로 채운 건은 balanceAuto 로 표시해 둔다.
+function autoSettleDomBalances(){
+  const today = isoDate(new Date());
+  let n = 0;
+  domesticPos.forEach(p => {
+    if(p.balanceDate || !p.balancePlannedDate || p.balancePlannedDate >= today) return;
+    if((parseFloat(p.depositPct)||0) >= 100) return;            // 선금 100% — 잔금이 없음
+    p.balanceDate = p.balancePlannedDate;
+    p.balanceShared = 'O';
+    p.balanceAuto = true;
+    n++;
+  });
+  if(n) console.log('[국내발주] 잔금지급 예정일이 지난', n, '건을 잔금 지급으로 처리했습니다');
+  return n;
 }
 // 'YYYY-MM-DD' → 다음 달 'YYYY-MM'
 function nextMonthOf(dateStr){
@@ -5154,6 +5171,8 @@ function openDomPanel(id){
   syncDomShareDisplays();
   refreshErpRow('dom', id);
   qiRenderBanner('dom');
+  { const cur = id ? domesticPos.find(p=>p.id===id) : null;
+    document.getElementById('domBalanceAutoNote').style.display = (cur && cur.balanceAuto && cur.balanceDate) ? '' : 'none'; }
   if(id) highlightRows([id]); else clearRowHighlights();
   domOverlay.classList.add('active');
 }
@@ -5244,12 +5263,15 @@ domForm.addEventListener('submit', async (e)=>{
     }
     if(editingDomId){
       const idx = domesticPos.findIndex(p=>p.id===editingDomId);
+      // 잔금지급일을 직접 바꿨으면 '자동 처리' 표시를 뗀다
+      if(domesticPos[idx].balanceAuto && data.balanceDate !== domesticPos[idx].balanceDate) data.balanceAuto = false;
       domesticPos[idx] = {...domesticPos[idx], ...data};
     }else{
       data.id = 'dom_' + Date.now();
       domesticPos.push(data);
       newForQi = [{code:data.itemCode, name:data.itemName, kind:'dom'}];
     }
+    autoSettleDomBalances();   // 예정일이 이미 지난 건은 바로 잔금 지급으로
     await saveDomesticPos();
     closeDomPanel();
     render();
