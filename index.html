@@ -117,6 +117,11 @@
   .kpi-lbl{font-size:12.5px; color:var(--console-text-dim); margin-top:3px; font-weight:600;}
 
   .donut-wrap{display:flex; align-items:center; gap:16px;}
+  .fx-quick{display:flex; gap:5px; flex-wrap:wrap; margin:-2px 0 12px}
+  .fx-quick button{flex:1 1 auto; padding:6px 8px; border:1px solid var(--console-line); background:var(--console-panel); border-radius:6px;
+    font-size:12px; font-weight:700; color:var(--ink-soft); cursor:pointer; white-space:nowrap}
+  .fx-quick button:hover{border-color:var(--console-accent); color:var(--console-accent)}
+  .fx-quick button.on{background:var(--console-accent); border-color:var(--console-accent); color:#fff}
   .fx-head{display:flex; justify-content:space-between; align-items:flex-start; gap:8px; flex-wrap:wrap}
   .fx-head .clabel{margin-bottom:0}
   .fx-link{font-size:15px; font-weight:800; color:#dc2626; text-decoration:none;
@@ -773,6 +778,11 @@
           <div class="fx-row">
             <div class="fx-field"><label>요청일 시작</label><input type="date" id="fxDateStart"></div>
             <div class="fx-field"><label>요청일 종료</label><input type="date" id="fxDateEnd"></div>
+          </div>
+          <div class="fx-quick" id="fxQuick">
+            <button type="button" data-q="y">올해 전체</button><button type="button" data-q="1">1분기</button>
+            <button type="button" data-q="2">2분기</button><button type="button" data-q="3">3분기</button>
+            <button type="button" data-q="4">4분기</button><button type="button" data-q="all">전체 기간</button>
           </div>
           <div class="fx-totals">
             <div class="fx-total-row"><span class="cur">건수</span><span class="amt" id="fxCount">0건</span></div>
@@ -2941,8 +2951,31 @@ document.getElementById('fxCny').addEventListener('input', ()=>{
   renderDashboard();
   saveFxRates();
 });
-document.getElementById('fxDateStart').addEventListener('input', updateFxTotals);
-document.getElementById('fxDateEnd').addEventListener('input', updateFxTotals);
+document.getElementById('fxDateStart').addEventListener('input', ()=>{ fxQuickMark(); updateFxTotals(); });
+document.getElementById('fxDateEnd').addEventListener('input', ()=>{ fxQuickMark(); updateFxTotals(); });
+// 올해 전체 · 1~4분기 · 전체 기간 빠른 선택 (요청일 기준)
+function fxQuickRange(q){
+  const y = new Date().getFullYear();
+  if(q === 'all') return ['', ''];
+  if(q === 'y') return [`${y}-01-01`, `${y}-12-31`];
+  const n = +q, m1 = (n-1)*3+1, last = new Date(y, n*3, 0).getDate();
+  return [`${y}-${String(m1).padStart(2,'0')}-01`, `${y}-${String(n*3).padStart(2,'0')}-${last}`];
+}
+function fxQuickMark(){
+  const a = document.getElementById('fxDateStart').value, b = document.getElementById('fxDateEnd').value;
+  document.querySelectorAll('#fxQuick button').forEach(btn=>{
+    const [s, e] = fxQuickRange(btn.dataset.q);
+    btn.classList.toggle('on', a === s && b === e);
+  });
+}
+document.getElementById('fxQuick').addEventListener('click', e=>{
+  const btn = e.target.closest('button[data-q]'); if(!btn) return;
+  const [s, en] = fxQuickRange(btn.dataset.q);
+  document.getElementById('fxDateStart').value = s;
+  document.getElementById('fxDateEnd').value = en;
+  fxQuickMark(); updateFxTotals();
+});
+fxQuickMark();
 
 // 기간별 금액 조회 (환율 환산 패널) — 요청일 기준으로 필터링해 KRW/USD/CNY(위안) 총액을 보여준다
 function updateFxTotals(){
