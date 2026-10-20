@@ -2638,7 +2638,7 @@ function stockSubCell(p){
   const n = parseFloat(p.stock);
   if(isNaN(n)) return '';
   const shown = n < 0 ? 0 : n;
-  return `<div style="font-size:10.5px; color:var(--ink-soft); font-weight:600; margin-top:2px;">현재 재고: ${Number(shown).toLocaleString()}개</div>`;
+  return `<div style="font-size:10.5px; color:var(--ink-soft); font-weight:600; margin-top:2px;">현재 재고: <span style="color:#dc2626; font-weight:800; font-size:12px;">${Number(shown).toLocaleString()}개</span></div>`;
 }
 function krwSub(usdAmount){
   const rate = fxRates.krw || 0;
