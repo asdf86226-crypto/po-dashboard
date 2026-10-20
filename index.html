@@ -195,7 +195,7 @@
   .poc-group-head .poc-mail-to.none{color:#fbbf24;}
   /* 메일 첨부용 PDF 만들 때만 쓰는 모양 (인쇄 모양과 같게) */
   .poc-pdf-stage{background:#fff; color:#111;}
-  .poc-pdf-stage .poc-group{border:1px solid #999; border-radius:0; margin:0; background:#fff;}
+  .poc-pdf-stage .poc-group{border:1px solid #999; border-radius:0; margin:0; background:#fff; box-sizing:border-box; width:100%; max-width:100%; overflow:hidden;}
   .poc-pdf-stage .poc-letterhead{padding:14px 18px 12px; border-bottom:2px solid #16233d;}
   .poc-pdf-stage .poc-letterhead .lh-name{font-size:18px; font-weight:800; color:#16233d; letter-spacing:.3px; margin:0 0 4px;}
   .poc-pdf-stage .poc-letterhead .lh-line{font-size:11.5px; color:#333; line-height:1.5; margin:2px 0;}
@@ -208,6 +208,10 @@
   .poc-pdf-stage .poc-table td:first-child, .poc-pdf-stage .poc-table th:first-child{padding-left:10px;}
   .poc-pdf-stage .item-badge{font-size:9px; padding:1px 4px;}
   .poc-pdf-stage .poc-table td[style*="text-align:right"], .poc-pdf-stage .poc-table td:first-child{white-space:nowrap; font-size:10.5px;}
+  /* 숫자·날짜 칸은 한 줄로 (품목코드·품명·비고만 줄바꿈) */
+  .poc-pdf-stage .poc-table td{font-size:10px; padding:7px 4px;}
+  .poc-pdf-stage .poc-table th{padding:7px 4px;}
+  .poc-pdf-stage .poc-table td:not(:nth-child(2)):not(:nth-child(3)):not(:last-child){white-space:nowrap;}
   .poc-table{width:100%; border-collapse:collapse; table-layout:fixed;}
   .poc-table th{background:#eef2f4; color:var(--ink-soft); font-size:11.5px; font-weight:700; text-align:left; padding:8px 12px; border-bottom:1px solid var(--line);}
   .poc-table td{padding:9px 12px; border-bottom:1px solid var(--line); font-size:13px;}
@@ -4512,12 +4516,13 @@ async function makePocPdf(gi, quality){
   stage.appendChild(src.cloneNode(true));
   // A4 폭에 맞게 칸 너비 조정 (국내 10칸: 단가·공급가액·부가세·합계 포함)
   const cols = stage.querySelectorAll('colgroup col');
-  const widths = cols.length === 10 ? [10,10,18,6,8,11,9,11,10,7] : cols.length === 6 ? [12,14,28,8,14,24] : null;
+  const widths = cols.length === 10 ? [10,11,16,7,7,11,9,12,11,6] : cols.length === 6 ? [12,14,28,8,14,24] : null;
   if(widths) cols.forEach((c, i)=>{ c.style.width = widths[i] + '%'; });
   const q = quality || {scale:2, jpeg:0.92};
   // 화면을 아래로 내린 상태에서 만들면 html2canvas 가 그만큼 밀려 찍혀 위가 비고 아래가 잘린다.
-  // 만드는 동안만 맨 위로 올렸다가 되돌린다. A4 본문 폭(190mm ≈ 718px)도 고정한다.
-  stage.style.width = '718px';
+  // 만드는 동안만 맨 위로 올렸다가 되돌린다.
+  stage.style.width = '700px';   // A4 본문(약 718px)보다 조금 좁게 — 윈도우 글꼴·화면 배율 차이로 오른쪽 테두리가 잘리지 않도록
+  stage.style.boxSizing = 'border-box';
   const sx = window.scrollX, sy = window.scrollY;
   window.scrollTo(0, 0);
   try{
