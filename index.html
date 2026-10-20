@@ -4515,13 +4515,20 @@ async function makePocPdf(gi, quality){
   const widths = cols.length === 10 ? [10,10,18,6,8,11,9,11,10,7] : cols.length === 6 ? [12,14,28,8,14,24] : null;
   if(widths) cols.forEach((c, i)=>{ c.style.width = widths[i] + '%'; });
   const q = quality || {scale:2, jpeg:0.92};
-  return html2pdf().set({
-    margin: [10, 10, 10, 10],
-    image: { type:'jpeg', quality:q.jpeg },
-    html2canvas: { scale:q.scale, backgroundColor:'#ffffff', logging:false },
-    jsPDF: { unit:'mm', format:'a4', orientation:'portrait' },
-    pagebreak: { mode:['css','legacy'], avoid:['tr', '.poc-letterhead', '.poc-group-head'] },
-  }).from(stage).toPdf().get('pdf');
+  // 화면을 아래로 내린 상태에서 만들면 html2canvas 가 그만큼 밀려 찍혀 위가 비고 아래가 잘린다.
+  // 만드는 동안만 맨 위로 올렸다가 되돌린다. A4 본문 폭(190mm ≈ 718px)도 고정한다.
+  stage.style.width = '718px';
+  const sx = window.scrollX, sy = window.scrollY;
+  window.scrollTo(0, 0);
+  try{
+    return await html2pdf().set({
+      margin: [10, 10, 10, 10],
+      image: { type:'jpeg', quality:q.jpeg },
+      html2canvas: { scale:q.scale, backgroundColor:'#ffffff', logging:false, scrollX:0, scrollY:0 },
+      jsPDF: { unit:'mm', format:'a4', orientation:'portrait' },
+      pagebreak: { mode:['css','legacy'], avoid:['tr', '.poc-letterhead', '.poc-group-head'] },
+    }).from(stage).toPdf().get('pdf');
+  }finally{ window.scrollTo(sx, sy); }
 }
 // 메일 첨부용 base64 — 너무 크면(약 3MB 이상) 화질을 낮춰 다시 만든다
 async function makePocPdfBase64(gi){
