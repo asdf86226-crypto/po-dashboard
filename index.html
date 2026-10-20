@@ -311,6 +311,32 @@
   .mc-breakdown{display:flex; flex-direction:column; gap:2px; font-size:11.5px; color:var(--ink-soft); flex:1;}
   .mc-total{font-family:var(--sans); font-weight:800; font-size:16px; color:var(--console-accent); text-align:right; min-width:120px;}
   .mc-deposit-list{border-top:1px solid var(--line); padding:10px 16px 12px; background:var(--console-bg);}
+  /* 월별 비용 — 공급사별 */
+  .mc-supp{border-top:1px solid var(--line); background:var(--console-bg); padding:6px 12px 10px}
+  .mc-sp{display:grid; grid-template-columns:minmax(160px,1.3fr) minmax(80px,2fr) 150px 140px; gap:14px; align-items:center;
+    padding:8px 6px; border-bottom:1px dashed var(--console-line); cursor:pointer; font-size:13px}
+  .mc-sp:last-of-type{border-bottom:0}
+  .mc-sp:hover{background:rgba(63,125,140,.07)}
+  .mc-sp .nm{font-weight:800; color:var(--ink); overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  .mc-sp .nm small{font-weight:600; color:var(--ink-soft); margin-left:6px; font-size:11.5px}
+  .mc-sp .nm .car{display:inline-block; width:12px; color:var(--ink-soft); font-size:10px}
+  .mc-sp .bar{height:8px; background:rgba(63,125,140,.12); border-radius:4px; overflow:hidden}
+  .mc-sp .bar i{display:block; height:100%; background:var(--console-accent); border-radius:4px}
+  .mc-sp .paid{font-size:11.5px; color:var(--ink-soft); text-align:right; white-space:nowrap}
+  .mc-sp .due{font-weight:800; text-align:right; color:var(--console-accent); white-space:nowrap; font-variant-numeric:tabular-nums}
+  .mc-sp .due.zero{color:var(--ink-soft); font-weight:600}
+  .mc-sp-items{display:none; margin:2px 0 8px 18px; border-left:2px solid var(--console-line); padding-left:10px}
+  .mc-sp-items.open{display:block}
+  .mc-it{display:grid; grid-template-columns:1fr auto auto; gap:12px; align-items:baseline; padding:5px 4px; font-size:12.5px; cursor:pointer; border-radius:4px}
+  .mc-it:hover{background:#fff}
+  .mc-it .n{color:var(--ink); font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  .mc-it .n .c{color:var(--ink-soft); font-weight:600; margin-left:6px; font-size:11.5px}
+  .mc-it .m{color:var(--ink-soft); font-size:11.5px; white-space:nowrap}
+  .mc-it .a{font-weight:700; text-align:right; min-width:110px; font-variant-numeric:tabular-nums}
+  .mc-supp-head{display:grid; grid-template-columns:minmax(160px,1.3fr) minmax(80px,2fr) 150px 140px; gap:14px; padding:4px 6px 2px;
+    font-size:10.5px; font-weight:800; color:var(--ink-soft); letter-spacing:.02em}
+  .mc-supp-head span:nth-child(3), .mc-supp-head span:nth-child(4){text-align:right}
+  @media (max-width:760px){ .mc-sp, .mc-supp-head{grid-template-columns:1fr 110px} .mc-sp .bar, .mc-sp .paid, .mc-supp-head span:nth-child(2), .mc-supp-head span:nth-child(3){display:none} }
   .mc-deposit-heading{font-size:10.5px; font-weight:800; color:var(--ink-soft); margin-bottom:6px; letter-spacing:0.02em;}
   .mc-deposit-row{
     display:flex; align-items:center; gap:10px; font-size:12px; padding:4px 0;
@@ -906,7 +932,7 @@
   <!-- ===================== MONTHLY COST FORECAST ===================== -->
   <div class="view" id="view-monthcost">
     <div class="view-header"><span class="vlabel">월별 예상 비용</span></div>
-    <div class="cal-hint">각 발주의 납기요청일 기준으로 월별 예상 지출 합계를 보여줍니다. 해외는 CI금액(없으면 PI금액)을 환율로 환산, 국내는 실제입고금액(없으면 발주금액) 기준이며, <b>국내발주는 입고월 다음 달 말일</b>에 지급되는 돈으로 잡습니다(잔금지급 예정일이 있으면 그 달, 아직 입고 전이면 입고요청일 다음 달). <b>선금·잔금 지급일이 입력되지 않은(=아직 지급 전) 금액만 예상비용으로 합산</b>되며, 지급일이 입력된 금액은 합계에서 빠지고 아래 <b>"선금 지급내역"·"잔금 지급내역"</b>에 <b>CI번호 기준</b>으로 묶여 표시됩니다(CI 미발행이면 PI 기준, 국내발주는 건별). 종결(ERP입력완료)된 건은 월별 합계에서 제외되며, 그중 <b>아직 지급되지 않은 금액이 남은 건은 맨 아래 "ERP입력 완료 · 미지급"</b>에 따로 모아 보여줍니다.</div>
+    <div class="cal-hint">각 발주의 납기요청일 기준으로 월별 예상 지출 합계를 보여줍니다. 해외는 CI금액(없으면 PI금액)을 환율로 환산, 국내는 실제입고금액(없으면 발주금액) 기준이며, <b>국내발주는 입고월 다음 달 말일</b>에 지급되는 돈으로 잡습니다(잔금지급 예정일이 있으면 그 달, 아직 입고 전이면 입고요청일 다음 달). <b>선금·잔금 지급일이 입력되지 않은(=아직 지급 전) 금액만 예상비용으로 합산</b>되며, 지급일이 입력된 금액은 합계에서 빠지고 공급사 줄의 <b>"이미 지급"</b>에 따로 적힙니다. 달마다 <b>공급사별</b>로 남은 지급 예정 금액이 큰 순서로 보이고, <b>공급사를 누르면 그 업체 품목</b>이, 품목을 누르면 발주 창이 열립니다. 종결(ERP입력완료)된 건은 월별 합계에서 제외되며, 그중 <b>아직 지급되지 않은 금액이 남은 건은 맨 아래 "ERP입력 완료 · 미지급"</b>에 따로 모아 보여줍니다.</div>
 
     <div class="view-header" style="margin-top:8px;"><span class="vlabel">해외 발주 · 월별 예상 비용</span></div>
     <div class="mc-grand-row">
@@ -3305,22 +3331,39 @@ function renderMonthCostSection(source, items, listElId, emptyElId, grandElId){
       const g = groups[m];
       const [y, mm] = m.split('-');
       const isPast = m < todayMonth;
-      const paidHtml = ['deposit','balance'].map(kind=>{
-        const entries = buildPaidSummary(g.items, kind);
-        if(!entries.length) return '';
-        const heading = kind==='balance' ? '잔금 지급내역' : '선금 지급내역';
-        return `
-        <div class="mc-deposit-list">
-          <div class="mc-deposit-heading">${heading}</div>
-          ${entries.map(d=>`
-            <div class="mc-deposit-row">
-              <span class="mc-deposit-label">${d.label}${d.count>1?` <span style="opacity:.7; font-weight:600;">${d.count}건</span>`:''}</span>
-              <span class="mc-deposit-date">${d.payDate||'-'} 지급</span>
-              <span class="mc-deposit-amt">${fmtKrw(d.amountKrw)}</span>
-            </div>
-          `).join('')}
+      // 공급사별로 묶는다 — 미지급(예정) 금액 큰 순. 이미 지급한 선금·잔금은 따로 적는다.
+      const sup = {};
+      g.items.forEach(it=>{
+        const k = (it.supplier||'').trim() || '(공급사 미지정)';
+        const x = sup[k] || (sup[k] = {name:k, items:[], due:0, paid:0});
+        x.items.push(it);
+        x.due += it.amountKrw;
+        x.paid += (it.depositPaid?it.depositAmountKrw:0) + (it.balancePaid?it.balanceAmountKrw:0);
+      });
+      const sups = Object.values(sup).sort((a,b)=> b.due-a.due || b.paid-a.paid || a.name.localeCompare(b.name,'ko'));
+      const maxDue = Math.max(1, ...sups.map(x=>x.due));
+      const itemLine = it=>{
+        const ref = it.source==='overseas'
+          ? [it.ciNo?`CI ${it.ciNo}`:'', it.piNo?`PI ${it.piNo}`:''].filter(Boolean).join(' · ')
+          : (it.warehouseDate?`입고 ${it.warehouseDate}`:`입고요청 ${it.dueDate||'-'}`);
+        const paid = [it.depositPaid?`선금 ${it.depositDate||''} 지급`:'', it.balancePaid?`잔금 ${it.balanceDate||''} 지급`:''].filter(Boolean).join(' · ');
+        return `<div class="mc-it" data-id="${it.id}" data-source="${it.source}">
+          <span class="n">${escHtmlPoc(it.itemName||'(품명 미입력)')}${it.itemCode?`<span class="c">${escHtmlPoc(it.itemCode)}</span>`:''}</span>
+          <span class="m">${escHtmlPoc([ref, paid].filter(Boolean).join(' · '))}</span>
+          <span class="a">${it.amountKrw>0?fmtKrw(it.amountKrw):'<span style="color:var(--ink-soft); font-weight:600;">지급완료</span>'}</span>
         </div>`;
-      }).join('');
+      };
+      const paidHtml = `<div class="mc-supp">
+        <div class="mc-supp-head"><span>공급사 (눌러서 품목 보기)</span><span></span><span>이미 지급</span><span>남은 지급 예정</span></div>
+        ${sups.map(x=>`
+          <div class="mc-sp">
+            <span class="nm"><span class="car">▸</span>${escHtmlPoc(x.name)}<small>${x.items.length}건</small></span>
+            <span class="bar"><i style="width:${(x.due/maxDue*100).toFixed(1)}%"></i></span>
+            <span class="paid">${x.paid>0?'지급 '+fmtKrw(x.paid):''}</span>
+            <span class="due${x.due>0?'':' zero'}">${x.due>0?fmtKrw(x.due):'지급완료'}</span>
+          </div>
+          <div class="mc-sp-items">${x.items.slice().sort((a,b)=>b.amountKrw-a.amountKrw).map(itemLine).join('')}</div>`).join('')}
+      </div>`;
       return `<div class="mc-row" data-month="${source+':'+m}">
         <div class="mc-row-top">
           <div class="mc-month ${isPast?'past':''}">${y}년 ${parseInt(mm,10)}월${isPast?'<span class="mc-overdue">지남</span>':''}</div>
@@ -3333,6 +3376,20 @@ function renderMonthCostSection(source, items, listElId, emptyElId, grandElId){
     }).join('');
     listEl.querySelectorAll('.mc-row').forEach(row=>{
       row.querySelector('.mc-row-top').addEventListener('click', ()=> openMonthCostDetail(row.dataset.month));
+    });
+    // 공급사를 누르면 그 업체 품목을 펼치고, 품목을 누르면 발주 창을 연다
+    listEl.querySelectorAll('.mc-sp').forEach(sp=>{
+      sp.addEventListener('click', ()=>{
+        const box = sp.nextElementSibling, open = !box.classList.contains('open');
+        box.classList.toggle('open', open);
+        sp.querySelector('.car').textContent = open ? '▾' : '▸';
+      });
+    });
+    listEl.querySelectorAll('.mc-it').forEach(el=>{
+      el.addEventListener('click', ()=>{
+        if(el.dataset.source==='overseas'){ poPanelReturnToPiGroup = null; openPoPanel(el.dataset.id); }
+        else openDomPanel(el.dataset.id);
+      });
     });
   }
   const grandTotal = months.reduce((sum,m)=> sum+groups[m].krw, 0);
