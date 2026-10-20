@@ -1630,6 +1630,7 @@ async function loadData(){
       });
     }catch(e){ domesticPos = []; }
     showStockSrc(null, false);
+    setTimeout(autoStockSync, 1500);   // 화면을 먼저 그린 뒤 쉐어포인트 재고를 조용히 반영
     pushPoStatusSoon();   // 열 때 한 번 — 다른 PC에서 고친 내용도 구매요청 화면에 맞춘다
     try{
       const r = await window.storage.get('approvalBatches', false);
@@ -1965,6 +1966,49 @@ function showStockSrc(text, save){
   el.textContent = v ? `${v.text} · ${v.at} 가져옴` : '';
   el.classList.toggle('sp', !!(v && /쉐어포인트/.test(v.text)));
 }
+// 발주 목록의 '현재 재고'를 품목코드별 재고로 바꾸고, 바뀐 건수를 돌려준다
+function applyStockMap(stockByCode, known){
+  let n = 0;
+  const apply = list => list.forEach(p => {
+    if(!p.itemCode) return;
+    let next;
+    if(stockByCode[p.itemCode] != null) next = stockByCode[p.itemCode];
+    else if(known.has(p.itemCode)) next = 0;    // ERP에 있는데 재고값만 없음
+    else next = null;                           // ERP에 아예 없음 → 미등록
+    if(p.stock !== next){ p.stock = next; n++; }
+  });
+  apply(pos); apply(domesticPos);
+  return n;
+}
+// 열 때(그리고 30분 넘게 지나 다시 볼 때) 쉐어포인트 재고를 조용히 받아 반영한다 — 구매요청 대시보드와 같은 방식.
+// 로그인 창은 띄우지 않는다(로그인 기록이 없으면 건너뜀). 재고현황 파일이 그대로면 받지 않는다.
+const STOCK_SIG_KEY = 'po_dash:stockSig';
+let stockAutoAt = 0, stockAutoBusy = false;
+async function autoStockSync(){
+  if(VIEWER || stockAutoBusy || !window.MmsSp) return;
+  stockAutoBusy = true; stockAutoAt = Date.now();
+  try{
+    if(!(await MmsSp.signedIn())) return;
+    const metas = [];
+    for(const company of MmsSp.COMPANIES) metas.push(await MmsSp.meta(MmsSp.reportPath(company, '재고현황'), false));
+    const sig = metas.map(m => m.eTag).join('|');
+    let last = ''; try{ last = localStorage.getItem(STOCK_SIG_KEY) || ''; }catch(e){}
+    // 재고를 한 번도 못 받은 발주(새로 등록한 건 등)가 있으면 파일이 그대로여도 받는다
+    const missing = [].concat(pos, domesticPos).some(p => p.itemCode && (p.stock === undefined || p.stock === ''));
+    if(sig === last && !missing) return;
+    const sp = await mmsStockFromSharePoint();
+    const n = applyStockMap(sp.stock, sp.known);
+    if(n){ await savePos(); await saveDomesticPos(); render(); }
+    try{ localStorage.setItem(STOCK_SIG_KEY, sig); }catch(e){}
+    if(sp.at) showStockSrc('재고: 쉐어포인트 ' + sp.at + ' 기준', true);
+    console.log('[재고] 자동 반영:', n, '건 바뀜 · 기준', sp.at);
+  }catch(e){
+    console.warn('[재고] 자동 반영 실패 (버튼으로 다시 가져올 수 있습니다):', e);
+  }finally{ stockAutoBusy = false; }
+}
+document.addEventListener('visibilitychange', () => {
+  if(document.visibilityState === 'visible' && Date.now() - stockAutoAt > 30*60*1000) autoStockSync();
+});
 async function pullPurchaseRequests(){
   let url = reqGetUrl();
   if(!url){
@@ -2032,18 +2076,7 @@ async function pullPurchaseRequests(){
     const stockSrc = spStockAt ? '재고: 쉐어포인트 ' + spStockAt + ' 기준' : '재고: 갱신 못 함 (쉐어포인트 연결 확인)';
     if(spStockAt) showStockSrc(stockSrc, true);
     else{ const el = document.getElementById('stockSrcNote'); if(el){ el.textContent = stockSrc; el.classList.remove('sp'); } }
-    if(haveAny){
-      const applyStock = list => list.forEach(p => {
-        if(!p.itemCode) return;
-        let next;
-        if(stockByCode[p.itemCode] != null) next = stockByCode[p.itemCode];
-        else if(erpKnownCodes.has(p.itemCode)) next = 0;  // ERP에 있는데 재고값만 없음
-        else next = null;                                 // ERP에 아예 없음 → 미등록
-        if(p.stock !== next){ p.stock = next; stockUpdated++; }
-      });
-      applyStock(pos);
-      applyStock(domesticPos);
-    }
+    if(haveAny) stockUpdated = applyStockMap(stockByCode, erpKnownCodes);
 
     // 이미 가져온 건은 제외 (해외/국내 양쪽 모두 확인)
     const seen = new Set([].concat(pos, domesticPos).map(p=>p.srcId).filter(Boolean));
