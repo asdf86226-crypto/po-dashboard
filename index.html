@@ -3335,8 +3335,9 @@ function renderMonthCostSection(source, items, listElId, emptyElId, grandElId){
       const sup = {};
       g.items.forEach(it=>{
         const k = (it.supplier||'').trim() || '(공급사 미지정)';
-        const x = sup[k] || (sup[k] = {name:k, items:[], due:0, paid:0});
+        const x = sup[k] || (sup[k] = {name:k, items:[], due:0, paid:0, unknown:0});
         x.items.push(it);
+        if(!(it.fullAmountKrw>0)) x.unknown++;   // PI(국내는 발주금액)를 아직 안 받아 금액을 모르는 건
         x.due += it.amountKrw;
         x.paid += (it.depositPaid?it.depositAmountKrw:0) + (it.balancePaid?it.balanceAmountKrw:0);
       });
@@ -3350,7 +3351,9 @@ function renderMonthCostSection(source, items, listElId, emptyElId, grandElId){
         return `<div class="mc-it" data-id="${it.id}" data-source="${it.source}">
           <span class="n">${escHtmlPoc(it.itemName||'(품명 미입력)')}${it.itemCode?`<span class="c">${escHtmlPoc(it.itemCode)}</span>`:''}</span>
           <span class="m">${escHtmlPoc([ref, paid].filter(Boolean).join(' · '))}</span>
-          <span class="a">${it.amountKrw>0?fmtKrw(it.amountKrw):'<span style="color:var(--ink-soft); font-weight:600;">지급완료</span>'}</span>
+          <span class="a">${it.amountKrw>0?fmtKrw(it.amountKrw)
+            : !(it.fullAmountKrw>0) ? `<span style="color:var(--warn); font-weight:700;">금액 미정 (${it.source==='overseas'?'PI 전':'발주금액 없음'})</span>`
+            : '<span style="color:var(--ink-soft); font-weight:600;">지급완료</span>'}</span>
         </div>`;
       };
       const paidHtml = `<div class="mc-supp">
@@ -3360,14 +3363,14 @@ function renderMonthCostSection(source, items, listElId, emptyElId, grandElId){
             <span class="nm"><span class="car">▸</span>${escHtmlPoc(x.name)}<small>${x.items.length}건</small></span>
             <span class="bar"><i style="width:${(x.due/maxDue*100).toFixed(1)}%"></i></span>
             <span class="paid">${x.paid>0?'지급 '+fmtKrw(x.paid):''}</span>
-            <span class="due${x.due>0?'':' zero'}">${x.due>0?fmtKrw(x.due):'지급완료'}</span>
+            <span class="due${x.due>0?'':' zero'}">${x.due>0?fmtKrw(x.due):(x.unknown?'':'지급완료')}${x.unknown?`<div style="font-size:11px; font-weight:700; color:var(--warn);">금액 미정 ${x.unknown}건</div>`:''}</span>
           </div>
           <div class="mc-sp-items">${x.items.slice().sort((a,b)=>b.amountKrw-a.amountKrw).map(itemLine).join('')}</div>`).join('')}
       </div>`;
       return `<div class="mc-row" data-month="${source+':'+m}">
         <div class="mc-row-top">
           <div class="mc-month ${isPast?'past':''}">${y}년 ${parseInt(mm,10)}월${isPast?'<span class="mc-overdue">지남</span>':''}</div>
-          <div class="mc-count">${g.items.length}건</div>
+          <div class="mc-count">${g.items.length}건${(()=>{ const u=g.items.filter(it=>!(it.fullAmountKrw>0)).length; return u?` <span style="color:var(--warn); font-weight:700; white-space:nowrap;">· 금액 미정 ${u}건</span>`:''; })()}</div>
           <div class="mc-breakdown"><span>&nbsp;</span></div>
           <div class="mc-total">${fmtKrw(g.krw)}</div>
         </div>
