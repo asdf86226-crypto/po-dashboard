@@ -380,6 +380,12 @@
   .supp-chip.active{ background:var(--console-accent); color:#fff; border-color:var(--console-accent); }
   .supp-chip .n{ font-size:10.5px; opacity:.75; font-weight:700; }
   .supp-chip.active .n{ opacity:.9; }
+  #poSuppChips, #domSuppChips{margin-bottom:12px}
+  #poSuppChips .supp-chip-row, #domSuppChips .supp-chip-row{margin-bottom:6px}
+  #poSuppChips .supp-chip-row .label, #domSuppChips .supp-chip-row .label{min-width:46px}
+  .supp-chip.all{font-weight:800}
+  .supp-chip-gap{flex:1}
+  .supp-chip.every{background:transparent; border-style:dashed}
   .btn{
     background:var(--navy); color:#f3efe4; border:none; padding:10px 18px; border-radius:6px;
     font-size:13px; font-weight:600; cursor:pointer; letter-spacing:.2px;
@@ -805,7 +811,7 @@
       </div>
     </div>
     <div class="cal-legend" id="poStageLegend"></div>
-    <div class="supp-chip-row" id="poSuppChips"></div>
+    <div id="poSuppChips"></div>
     <div class="filter-banner" id="poFilterBanner" style="display:none;"></div>
     <div class="table-wrap">
       <table id="poTable">
@@ -839,7 +845,7 @@
       </div>
     </div>
     <div class="cal-legend" id="domStageLegend"></div>
-    <div class="supp-chip-row" id="domSuppChips"></div>
+    <div id="domSuppChips"></div>
     <div class="filter-banner" id="domFilterBanner" style="display:none;"></div>
     <div class="table-wrap">
       <table id="domTable">
@@ -1465,6 +1471,7 @@ let poStageFilter = null; // set by clicking a stage-distribution number on the 
 let domStageFilter = null; // 국내발주건용
 let poSupplierFilter = null;  // 해외발주 공급사 칩 필터 — null이면 전체
 let domSupplierFilter = null; // 국내발주 공급사 칩 필터 — null이면 전체
+let poDoneFilter = null, domDoneFilter = null;   // 공급사 칩의 진행중/완료 줄 — null 전체 · 'active' 진행중 · 'done' 완료(ERP입력완료)
 // one shared, highly distinguishable multi-hue palette (grey start -> warm -> cool -> green finish)
 // used everywhere: table badges, stage bar, calendar dots/events
 const STAGE_COLORS = ["#94a3b8","#ea580c","#d97706","#ca8a04","#65a30d","#0d9488","#0284c7","#2563eb","#7c3aed","#16a34a"];
@@ -2942,8 +2949,11 @@ function getFilteredPos(){
   if(poStageFilter !== null){
     filtered = filtered.filter(p=> computeStageIndex(p) === poStageFilter);
   }
-  if(poSupplierFilter){
-    filtered = filtered.filter(p=> (p.supplier||'') === poSupplierFilter);
+  if(poSupplierFilter !== null){
+    filtered = filtered.filter(p=> (p.supplier||'').trim() === poSupplierFilter);
+  }
+  if(poDoneFilter){
+    filtered = filtered.filter(p=> (computeStageIndex(p) === 9) === (poDoneFilter === 'done'));
   }
   if(dateStart){
     filtered = filtered.filter(p=> p.reqDate && p.reqDate >= dateStart);
@@ -2980,41 +2990,40 @@ function renderSupplierChips(kind){
   const containerId = kind === 'dom' ? 'domSuppChips' : 'poSuppChips';
   const container = document.getElementById(containerId);
   if(!container) return;
-  const currentFilter = kind === 'dom' ? domSupplierFilter : poSupplierFilter;
-
-  // 공급사별 건수 집계 — 미지정 건은 key='' 로 보관
-  const counts = {};
+  const curSup = kind === 'dom' ? domSupplierFilter : poSupplierFilter;
+  const curDone = kind === 'dom' ? domDoneFilter : poDoneFilter;
+  // 완료 = ERP입력완료 (해외 단계 9 · 국내 단계 5). 진행중과 완료를 두 줄로 나눠 공급사별 건수를 보여준다.
+  const isDone = p => kind === 'dom' ? computeDomStageIndex(p) === 5 : computeStageIndex(p) === 9;
+  const counts = {active:{}, done:{}}, tot = {active:0, done:0};
   list.forEach(p => {
-    const key = (p.supplier||'').trim();
-    counts[key] = (counts[key]||0) + 1;
+    const st = isDone(p) ? 'done' : 'active', key = (p.supplier||'').trim();
+    counts[st][key] = (counts[st][key]||0) + 1; tot[st]++;
   });
-  const supplierKeys = Object.keys(counts).filter(k => k !== '').sort((a,b)=> a.localeCompare(b, 'ko'));
-  const hasUnassigned = (counts[''] || 0) > 0;
-
-  // 각 chip은 data-key에 상태값을 그대로 담아둔다. '__ALL__' 는 null, '__UNASSIGNED__' 는 '' 로 취급.
-  const chipHtml = (label, dataKey, count, active) =>
-    `<span class="supp-chip${active?' active':''}" data-key="${dataKey}">${label}<span class="n">${count}</span></span>`;
-
-  let html = '<span class="label">공급사</span>';
-  html += chipHtml('전체', '__ALL__', list.length, currentFilter === null);
-  supplierKeys.forEach(name => {
-    html += chipHtml(name, name.replace(/"/g,'&quot;'), counts[name], currentFilter === name);
-  });
-  if(hasUnassigned){
-    html += chipHtml('(미지정)', '__UNASSIGNED__', counts[''], currentFilter === '');
-  }
-  container.innerHTML = html;
+  const esc = v => String(v).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
+  const chip = (label, st, sup, count, extra) => {
+    const active = curDone === st && curSup === sup;
+    return `<span class="supp-chip${active?' active':''}${extra||''}" data-st="${st||''}" data-sup="${sup===null?'__ALL__':esc(sup)}">${esc(label)}<span class="n">${count}</span></span>`;
+  };
+  const row = (st, label) => {
+    const keys = Object.keys(counts[st]).sort((a,b)=> a==='' ? 1 : b==='' ? -1 : a.localeCompare(b,'ko'));
+    return `<div class="supp-chip-row"><span class="label">${label}</span>`
+      + chip('전체', st, null, tot[st], ' all')
+      + keys.map(k => chip(k || '(미지정)', st, k, counts[st][k])).join('')
+      + (st === 'active' ? `<span class="supp-chip-gap"></span>` + chip('진행중 + 완료 모두', null, null, list.length, ' every') : '')
+      + `</div>`;
+  };
+  container.innerHTML = row('active', '진행중') + (tot.done ? row('done', '완료') : '');
 
   container.querySelectorAll('.supp-chip').forEach(el => {
     el.addEventListener('click', () => {
-      const k = el.dataset.key;
-      const next = k === '__ALL__' ? null : (k === '__UNASSIGNED__' ? '' : k);
-      // 같은 칩 재클릭하면 전체로 돌아감
+      const st = el.dataset.st || null, sup = el.dataset.sup === '__ALL__' ? null : el.dataset.sup;
+      // 같은 칩을 다시 누르면 전체로 돌아간다
+      const same = curDone === st && curSup === sup;
       if(kind === 'dom'){
-        domSupplierFilter = (domSupplierFilter === next) ? null : next;
+        domDoneFilter = same ? null : st; domSupplierFilter = same ? null : sup;
         renderDomTable();
       }else{
-        poSupplierFilter = (poSupplierFilter === next) ? null : next;
+        poDoneFilter = same ? null : st; poSupplierFilter = same ? null : sup;
         renderPoTable();
       }
     });
@@ -4183,11 +4192,13 @@ document.getElementById('poDateEnd').addEventListener('input', renderPoTable);
 function resetAllFilters(){
   poStageFilter = null;
   poSupplierFilter = null;
+  poDoneFilter = null;
   document.getElementById('poSearch').value = '';
   document.getElementById('poDateStart').value = '';
   document.getElementById('poDateEnd').value = '';
   domStageFilter = null;
   domSupplierFilter = null;
+  domDoneFilter = null;
   document.getElementById('domSearch').value = '';
   document.getElementById('domDateStart').value = '';
   document.getElementById('domDateEnd').value = '';
@@ -4924,8 +4935,11 @@ function getFilteredDom(){
   if(domStageFilter !== null){
     filtered = filtered.filter(p=> computeDomStageIndex(p) === domStageFilter);
   }
-  if(domSupplierFilter){
-    filtered = filtered.filter(p=> (p.supplier||'') === domSupplierFilter);
+  if(domSupplierFilter !== null){
+    filtered = filtered.filter(p=> (p.supplier||'').trim() === domSupplierFilter);
+  }
+  if(domDoneFilter){
+    filtered = filtered.filter(p=> (computeDomStageIndex(p) === 5) === (domDoneFilter === 'done'));
   }
   return filtered.sort((a,b)=> (b.reqDate||'').localeCompare(a.reqDate||''));
 }
