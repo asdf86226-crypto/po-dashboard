@@ -768,7 +768,7 @@
         </div>
 
         <div class="cpanel col-4" style="grid-row: span 2;">
-          <div class="fx-head"><span class="clabel">기간별 금액 조회 (환율 환산) · 선금·잔금 지급 완료건만</span>
+          <div class="fx-head"><span class="clabel">기간별 지급 금액 (환율 환산) · 지급일 기준</span>
           <a class="fx-link" href="http://www.smbs.biz/ExRate/MonAvgStdExRate.jsp" target="_blank" rel="noopener"
              title="서울외국환중개 — 월평균 매매기준율 (새 창)">환율</a></div>
           <div class="fx-row">
@@ -776,8 +776,8 @@
             <div class="fx-field"><label>CNY(위안) → KRW</label><input type="number" id="fxCny" step="0.01" placeholder="예: 190"></div>
           </div>
           <div class="fx-row">
-            <div class="fx-field"><label>요청일 시작</label><input type="date" id="fxDateStart"></div>
-            <div class="fx-field"><label>요청일 종료</label><input type="date" id="fxDateEnd"></div>
+            <div class="fx-field"><label>지급일 시작</label><input type="date" id="fxDateStart"></div>
+            <div class="fx-field"><label>지급일 종료</label><input type="date" id="fxDateEnd"></div>
           </div>
           <div class="fx-quick" id="fxQuick">
             <button type="button" data-q="y">올해 전체</button><button type="button" data-q="1">1분기</button>
@@ -790,7 +790,7 @@
             <div class="fx-total-row"><span class="cur">USD</span><span class="amt" id="totUsd">$0.00</span></div>
             <div class="fx-total-row"><span class="cur">CNY(위안)</span><span class="amt" id="totCny">¥0.00</span></div>
           </div>
-          <div class="fx-note">환율은 매일 직접 입력하는 값입니다(자동 조회 없음). <b>선금·잔금을 업체에 다 보낸(지급일 입력된) 해외발주만</b> 합산합니다. 요청일 기준으로 기간을 지정하면 그 기간 금액 합계(CI금액이 있으면 CI금액 기준)를 환율로 환산해 보여줍니다. 기간을 비워두면 지급 완료된 전체 발주가 대상입니다.</div>
+          <div class="fx-note">환율은 매일 직접 입력하는 값입니다(자동 조회 없음). 해외발주에서 <b>업체에 실제로 보낸 돈</b>을 <b>지급일 기준</b>으로 합산합니다. 선금은 선금 지급일, 잔금은 잔금 지급일이 기간 안에 있으면 들어갑니다(잔금은 CI금액이 있으면 CI 기준). '입고 후 지급' 체크만 한 건은 지급일이 입력돼야 들어갑니다. 기간을 비워두면 지금까지 보낸 전체 금액입니다.</div>
         </div>
 
         <div class="cpanel col-8">
@@ -2953,7 +2953,7 @@ document.getElementById('fxCny').addEventListener('input', ()=>{
 });
 document.getElementById('fxDateStart').addEventListener('input', ()=>{ fxQuickMark(); updateFxTotals(); });
 document.getElementById('fxDateEnd').addEventListener('input', ()=>{ fxQuickMark(); updateFxTotals(); });
-// 올해 전체 · 1~4분기 · 전체 기간 빠른 선택 (요청일 기준)
+// 올해 전체 · 1~4분기 · 전체 기간 빠른 선택 (지급일 기준)
 function fxQuickRange(q){
   const y = new Date().getFullYear();
   if(q === 'all') return ['', ''];
@@ -2977,35 +2977,22 @@ document.getElementById('fxQuick').addEventListener('click', e=>{
 });
 fxQuickMark();
 
-// 업체에 선금·잔금을 실제로 다 보낸 건 — 지급일이 입력돼 있어야 한다('입고 후 지급' 체크만 한 건은 아직 아님).
-// 선금이 없으면(0%) 선금은 따지지 않고, 선금 100%면 잔금이 없다.
-function isFullyPaid(p){
-  const {deposit, balance} = computeAmounts(p);
-  if(!(deposit + Math.max(0, balance) > 0)) return false;     // 금액이 없는 건(PI 전)은 제외
-  const depOk = deposit <= 0 || !!p.depositDate;
-  const balOk = balance <= 0.005 || isDepositFull(p) || !!p.balanceDate;
-  return depOk && balOk;
-}
-// 기간별 금액 조회 (환율 환산 패널) — 선금·잔금 지급 완료건만, 요청일 기준으로 필터링해 KRW/USD/CNY(위안) 총액을 보여준다
+// 기간별 금액 조회 (환율 환산 패널) — 업체에 실제로 보낸 돈을 '지급일' 기준으로 합산한다.
+// 선금은 선금 지급일, 잔금은 잔금 지급일이 기간 안에 있을 때 그 금액만 넣는다('입고 후 지급' 체크만 한 건은 아직 아님).
 function updateFxTotals(){
   const start = document.getElementById('fxDateStart').value;
   const end = document.getElementById('fxDateEnd').value;
-  const filtered = pos.filter(p=>{
-    if(!isFullyPaid(p)) return false;            // 선금·잔금을 실제로 다 보낸 건만
-    if(start && (!p.reqDate || p.reqDate < start)) return false;
-    if(end && (!p.reqDate || p.reqDate > end)) return false;
-    return true;
-  });
+  const inRange = d => !!d && (!start || d >= start) && (!end || d <= end);
   const krw = parseFloat(document.getElementById('fxKrw').value) || 0;
   const cny = parseFloat(document.getElementById('fxCny').value) || 0; // CNY(위안) → KRW 환율
-  // 각 건은 실제 결제 통화(USD 또는 CNY)가 다를 수 있으므로, 건별로 KRW로 환산한 뒤 합산한다
-  const krwTotal = filtered.reduce((s,p)=>{
-    const ciAmt = parseFloat(p.ciAmount)||0;
-    const piAmt = parseFloat(p.piAmount)||0;
-    const amt = ciAmt>0 ? ciAmt : piAmt;
-    return s + toKrwCur(amt, p.currency);
-  }, 0);
-  document.getElementById('fxCount').textContent = filtered.length + '건';
+  let krwTotal = 0, nDep = 0, nBal = 0;
+  pos.forEach(p=>{
+    const {deposit, balance} = computeAmounts(p);
+    // 건마다 결제 통화(USD 또는 CNY)가 달라 건별로 KRW 로 바꾼 뒤 더한다
+    if(deposit > 0 && inRange(p.depositDate)){ krwTotal += toKrwCur(deposit, p.currency); nDep++; }
+    if(balance > 0.005 && !isDepositFull(p) && inRange(p.balanceDate)){ krwTotal += toKrwCur(balance, p.currency); nBal++; }
+  });
+  document.getElementById('fxCount').textContent = `${nDep+nBal}건 (선금 ${nDep} · 잔금 ${nBal})`;
   document.getElementById('totKrw').textContent = '₩' + Math.round(krwTotal).toLocaleString();
   document.getElementById('totUsd').textContent = '$' + (krw>0 ? (krwTotal/krw).toLocaleString(undefined,{minimumFractionDigits:2, maximumFractionDigits:2}) : '0.00');
   document.getElementById('totCny').textContent = '¥' + (cny>0 ? (krwTotal/cny).toLocaleString(undefined,{minimumFractionDigits:2, maximumFractionDigits:2}) : '0.00');
