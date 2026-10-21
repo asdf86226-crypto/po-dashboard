@@ -1,6 +1,6 @@
 /* MMS 쉐어포인트 자료 읽기 — 발주현황 · 구매요청 · 판매현황 대시보드 공통 (세 저장소에 같은 파일)
  *
- * 사내 로컬PC(MMS)가 매시간 이카운트 자료를 쉐어포인트 [TADC › 문서 › MMS] 에 올린다.
+ * 사내 로컬PC(MMS)가 매시간 이카운트 자료를 쉐어포인트 [TDC(옛 TADC) › 문서 › MMS] 에 올린다.
  *   MMS/태성정밀/재고현황/재고현황_최신.xlsx, MMS/플로우텍/판매현황_전체/판매현황_전체_최신.xlsx …
  * 대시보드는 회사 마이크로소프트 계정으로 로그인해 그 파일을 읽기만 한다(비밀번호는 보지 않음).
  *
@@ -15,7 +15,9 @@
     clientId: '04714dbd-d7c3-4e27-b5e1-21ca15176c83',
     tenantId: 'affff796-2619-44f3-979f-6d2852623593',
     host: 'tsbath.sharepoint.com',
-    site: '/sites/TADC',
+    site: '/sites/TDC',
+    // 2026-10 사이트 이름을 TADC → TDC 로 바꿨다. 새 주소가 안 되면 옛 주소로 한 번 더 찾는다(사이트 고유번호는 같다)
+    oldSites: ['/sites/TADC'],
     root: 'MMS',
     scopes: ['Sites.Read.All'],
     redirect: location.origin + '/po-dashboard/auth.html',
@@ -83,20 +85,26 @@
     try { return !!accountOf(await getApp()); } catch (e) { return false; }
   }
 
-  // 사이트 주소(…:/sites/TADC:)와 파일 경로(root:/…)를 한 주소에 이어 쓰면 Graph 가 거부한다
+  // 사이트 주소(…:/sites/TDC:)와 파일 경로(root:/…)를 한 주소에 이어 쓰면 Graph 가 거부한다
   // ("Resource not found for the segment 'root:'"). 사이트 고유번호를 먼저 받아 두고 그걸로 파일을 찾는다.
   const SITE_KEY = 'mmsSpSiteId:' + CFG.host + CFG.site;
   let siteIdPromise = null;
   function siteId(t) {
     if (!siteIdPromise) {
       siteIdPromise = (async () => {
-        try { const c = localStorage.getItem(SITE_KEY); if (c) return c; } catch (e) {}
-        const res = await fetch(`https://graph.microsoft.com/v1.0/sites/${CFG.host}:${CFG.site}?$select=id`,
-                                { headers: { Authorization: 'Bearer ' + t } });
-        if (!res.ok) throw await httpError(res, '쉐어포인트 사이트 ' + CFG.site);
-        const id = (await res.json()).id;
-        try { localStorage.setItem(SITE_KEY, id); } catch (e) {}
-        return id;
+        const sites = [CFG.site].concat(CFG.oldSites || []);
+        // 이름을 바꿔도 사이트 고유번호는 그대로라 옛 주소로 받아 둔 번호도 그대로 쓴다
+        try { for (const s of sites) { const c = localStorage.getItem('mmsSpSiteId:' + CFG.host + s); if (c) return c; } } catch (e) {}
+        let err = null;
+        for (const s of sites) {
+          const res = await fetch(`https://graph.microsoft.com/v1.0/sites/${CFG.host}:${s}?$select=id`,
+                                  { headers: { Authorization: 'Bearer ' + t } });
+          if (!res.ok) { const e = await httpError(res, '쉐어포인트 사이트 ' + s); if (!err) err = e; if (res.status === 404) continue; throw e; }
+          const id = (await res.json()).id;
+          try { localStorage.setItem(SITE_KEY, id); } catch (e) {}
+          return id;
+        }
+        throw err;
       })().catch(e => { siteIdPromise = null; throw e; });
     }
     return siteIdPromise;
