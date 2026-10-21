@@ -215,6 +215,10 @@
   .poc-table{width:100%; border-collapse:collapse; table-layout:fixed;}
   .poc-table th{background:#eef2f4; color:var(--ink-soft); font-size:11.5px; font-weight:700; text-align:left; padding:8px 12px; border-bottom:1px solid var(--line);}
   .poc-table td{padding:9px 12px; border-bottom:1px solid var(--line); font-size:13px;}
+  /* 기본 td 는 한 줄(nowrap)이라 긴 특이사항·품명이 박스 밖으로 잘렸다 — 발주서 표는 줄바꿈, 숫자·날짜 칸만 한 줄 */
+  .poc-table{min-width:0;}   /* 기본 table 의 min-width:1400px 때문에 오른쪽 칸(특이사항)이 박스 밖으로 밀려 잘렸다 */
+  .poc-table td{white-space:normal; word-break:keep-all; overflow-wrap:anywhere; vertical-align:middle;}
+  .poc-table td[style*="text-align:right"], .poc-table td:first-child, .poc-table td:nth-last-child(2){white-space:nowrap;}
   .poc-table tr:last-child td{border-bottom:none;}
   .poc-empty{padding:50px 20px; text-align:center; color:var(--ink-soft);}
   .poc-doc-title, .poc-doc-meta, .poc-print-only{display:none;}
@@ -4787,7 +4791,7 @@ function pocDomTotals(items){
 }
 // A4 인쇄/PDF용 칸 너비 (국내 10칸 / 해외 6칸)
 const POC_DOM_COLS_PRINT = '<col style="width:10%"><col style="width:10%"><col style="width:18%"><col style="width:6%"><col style="width:8%"><col style="width:11%"><col style="width:9%"><col style="width:11%"><col style="width:10%"><col style="width:7%">';
-const POC_DOM_COLS = '<col style="width:8%"><col style="width:10%"><col style="width:17%"><col style="width:6%"><col style="width:9%"><col style="width:10%"><col style="width:9%"><col style="width:10%"><col style="width:9%"><col style="width:12%">';
+const POC_DOM_COLS = '<col style="width:8%"><col style="width:11%"><col style="width:15%"><col style="width:6%"><col style="width:8%"><col style="width:9%"><col style="width:8%"><col style="width:9%"><col style="width:8%"><col style="width:18%">';
 function pocDomHead(noteLabel){
   return '<tr><th>요청일</th><th>품목코드</th><th>품명</th><th>수량</th>'
     + '<th style="text-align:right;">단가</th><th style="text-align:right;">공급가액</th><th style="text-align:right;">부가세</th><th style="text-align:right;">합계</th>'
