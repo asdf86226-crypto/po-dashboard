@@ -2727,7 +2727,7 @@ function configureAutoSnap(){
   if(autoSnapUrl){ _autoSnapSent = ''; pushAutoSnap().then(()=> toast(_autoSnapSent ? '자동 보내기를 켰습니다 — 최신 내용을 저장했습니다' : '저장 흐름 호출 실패 — ' + _autoSnapErr, 12000)); }
   else toast('자동 보내기를 껐습니다');
 }
-// 월별비용 → 팀즈 메시지용 HTML (팀즈는 인라인 스타일을 지우므로 표 · 굵게 · 이모지만 쓴다)
+// 월별비용(해외 발주만) → 팀즈 메시지용 HTML (팀즈는 인라인 스타일을 지우므로 표 · 굵게 · 이모지만 쓴다)
 function buildMonthCostTeamsHtml(){
   const esc = s => String(s==null?'':s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[c]);
   const d = new Date(), p2 = n => String(n).padStart(2,'0');
@@ -2760,10 +2760,9 @@ function buildMonthCostTeamsHtml(){
       + '<tbody>'+rows+'</tbody></table>';
   };
   let html = '<h2>💰 월별 예상 비용</h2>'
-    + '<p><b>'+stamp+'</b> 기준 · 아직 지급하지 않은 금액만 · 해외는 환율 환산(원화) · 국내는 입고월 다음 달 지급</p>'
-    + section('해외 발주', list.filter(x=>x.source==='overseas'))
-    + section('국내 발주', list.filter(x=>x.source==='domestic'));
-  const unpaid = getClosedUnpaidList();
+    + '<p><b>'+stamp+'</b> 기준 · 해외 발주 · 아직 지급하지 않은 금액만 · 환율 환산(원화)</p>'
+    + section('해외 발주', list.filter(x=>x.source==='overseas'));   // 재무팀(정향미 매니저님)은 해외 건만
+  const unpaid = getClosedUnpaidList().filter(it=>it.source==='overseas');
   if(unpaid.length){
     const t = unpaid.reduce((s,it)=>s+it.amountKrw, 0);
     html += '<h3>■ 🔴 ERP입력 완료 · 미지급 '+unpaid.length+'건 · '+fmtKrw(t)+'</h3>'
