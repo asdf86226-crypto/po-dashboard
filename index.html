@@ -59,6 +59,14 @@
   body.viewer .brand .go-link{display:none}   /* 공유 열람용 화면에서는 숨김 */
   .brand .sub{font-size:12px; color:#aab7c6; margin-left:2px; font-family:var(--sans); font-weight:600; letter-spacing:.2px; border-left:1px solid #3a4a68; padding-left:12px;}
   .tabs{display:flex; gap:4px; flex-wrap:wrap; justify-content:flex-end;}
+  /* 제목줄 오른쪽 아래 — 쉐어포인트(MMS) 연결 상태 (구매요청 대시보드와 같은 모양·내용) */
+  .sp-top{flex-basis:100%; display:flex; justify-content:flex-end; align-items:center; gap:7px; margin-top:-2px;
+          font-size:11.5px; color:#aab7c6; font-family:var(--sans); line-height:1.5; text-align:right}
+  .sp-top:empty{display:none}
+  .sp-top .dot{width:7px; height:7px; border-radius:50%; flex:none; background:#8a94a6}
+  .sp-top.on .dot{background:#34d399} .sp-top.off .dot{background:#fbbf24}
+  .sp-top b{color:#eef2f7; font-weight:700}
+  body.viewer .sp-top{display:none}
   .stock-src{font-size:12px; color:var(--muted, #8a8476); align-self:center; white-space:nowrap}
   .stock-src.sp{color:#0f7a5a; font-weight:700}
   .topbar{flex-wrap:wrap; row-gap:10px;}
@@ -723,6 +731,7 @@
     <div class="tab" data-view="supp">거래처</div>
     <div class="tab" data-view="dhl">DHL계정</div>
   </div>
+  <div class="sp-top" id="spTop" title="쉐어포인트(MMS) 자료 기준 시각 — 열 때마다 바뀐 재고가 있으면 자동으로 반영합니다"></div>
 </div>
 
 <div class="wrap">
@@ -1650,6 +1659,7 @@ async function loadData(){
       if(autoSettleDomBalances()) saveDomesticPos();
     }catch(e){ domesticPos = []; }
     showStockSrc(null, false);
+    renderSpTop();                     // 지난번 연결 상태를 먼저 보여 주고
     setTimeout(autoStockSync, 1500);   // 화면을 먼저 그린 뒤 쉐어포인트 재고를 조용히 반영
     pushPoStatusSoon();   // 열 때 한 번 — 다른 PC에서 고친 내용도 구매요청 화면에 맞춘다
     try{
@@ -2003,14 +2013,47 @@ function applyStockMap(stockByCode, known){
 // 열 때(그리고 30분 넘게 지나 다시 볼 때) 쉐어포인트 재고를 조용히 받아 반영한다 — 구매요청 대시보드와 같은 방식.
 // 로그인 창은 띄우지 않는다(로그인 기록이 없으면 건너뜀). 재고현황 파일이 그대로면 받지 않는다.
 const STOCK_SIG_KEY = 'po_dash:stockSig';
+// 제목줄 오른쪽 아래 연결 상태 — 구매요청 대시보드와 같은 내용.
+// 재고 기준 시각은 여기서 직접 확인하고, 품목 수 · BOM 은 같은 주소의 구매요청 대시보드가 계산해 둔 값을 읽는다.
+const SP_LINE_KEY = 'po_dash:spLine';
+function renderSpTop(state, stockAt){
+  const el = document.getElementById('spTop'); if(!el || VIEWER) return;
+  let v = null; try{ v = JSON.parse(localStorage.getItem(SP_LINE_KEY) || 'null'); }catch(e){}
+  if(state){ v = { state, stockAt: stockAt || (v && v.stockAt) || '' }; try{ localStorage.setItem(SP_LINE_KEY, JSON.stringify(v)); }catch(e){} }
+  if(!window.MmsSp){ el.className = 'sp-top'; el.innerHTML = '<span class="dot"></span>이 파일에서는 쉐어포인트에 연결할 수 없습니다'; return; }
+  if(!v){ el.className = 'sp-top'; el.innerHTML = '<span class="dot"></span>쉐어포인트(MMS) 확인 중…'; return; }
+  if(v.state === 'off'){
+    el.className = 'sp-top off';
+    el.innerHTML = '<span class="dot"></span><b>연결 안 됨</b> · 📥 구매요청 및 재고 가져오기를 누르면 회사 계정으로 연결합니다';
+    return;
+  }
+  let erp = null; try{ erp = JSON.parse(localStorage.getItem('erp_dataset_v1') || 'null'); }catch(e){}
+  const parts = ['✅ 재고 ' + (v.stockAt || '–') + ' 기준'];
+  if(erp && erp.n) parts.push('품목 ' + Number(erp.n).toLocaleString() + '개');
+  if(erp && erp.src === 'sp') parts.push('판매 최근 12개월');
+  if(erp && erp.bomNote) parts.push(erp.bomNote);
+  el.className = 'sp-top on';
+  el.innerHTML = '<span class="dot"></span><b>쉐어포인트(MMS) 연결됨</b><span>' + parts.map(t => String(t).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))).join(' · ') + '</span>';
+}
+function spStamp(metas){
+  // 두 회사 중 더 오래된 쪽이 '모두 반영된' 기준 시각
+  const ts = metas.map(m => m && m.lastModifiedDateTime ? new Date(m.lastModifiedDateTime) : null).filter(Boolean);
+  if(!ts.length) return '';
+  const d = new Date(Math.min.apply(null, ts)), p2 = n => String(n).padStart(2,'0');
+  return d.getFullYear() + '-' + p2(d.getMonth()+1) + '-' + p2(d.getDate()) + ' ' + p2(d.getHours()) + ':' + p2(d.getMinutes());
+}
 let stockAutoAt = 0, stockAutoBusy = false;
 async function autoStockSync(){
   if(VIEWER || stockAutoBusy || !window.MmsSp) return;
   stockAutoBusy = true; stockAutoAt = Date.now();
   try{
-    if(!(await MmsSp.signedIn())) return;
+    if(!(await MmsSp.signedIn())){ renderSpTop('off'); return; }
     const metas = [];
-    for(const company of MmsSp.COMPANIES) metas.push(await MmsSp.meta(MmsSp.reportPath(company, '재고현황'), false));
+    for(const company of MmsSp.COMPANIES){
+      try{ metas.push(await MmsSp.meta(MmsSp.reportPath(company, '재고현황'), false)); }
+      catch(e){ if(e.status !== 404) throw e; }   // 한 회사 파일이 없어도 나머지로 판단
+    }
+    renderSpTop('on', spStamp(metas));
     const sig = metas.map(m => m.eTag).join('|');
     let last = ''; try{ last = localStorage.getItem(STOCK_SIG_KEY) || ''; }catch(e){}
     // 재고를 한 번도 못 받은 발주(새로 등록한 건 등)가 있으면 파일이 그대로여도 받는다
@@ -2045,7 +2088,9 @@ async function pullPurchaseRequests(){
   // 로그인 창은 버튼을 누른 직후에 띄워야 팝업이 막히지 않아 제일 먼저 로그인한다.
   // 못 받으면 재고는 손대지 않고(지난 값 유지) 구매요청만 가져온다.
   let spReady = false;
-  try{ if(!window.MmsSp) throw new Error('mms-sharepoint.js 를 불러오지 못했습니다'); await MmsSp.token(true); spReady = true; }
+  try{ if(!window.MmsSp) throw new Error('mms-sharepoint.js 를 불러오지 못했습니다'); await MmsSp.token(true); spReady = true;
+       (async () => { try{ const m = []; for(const c of MmsSp.COMPANIES) m.push(await MmsSp.meta(MmsSp.reportPath(c, '재고현황'), false));
+                            renderSpTop('on', spStamp(m)); }catch(e){} })(); }
   catch(e){
     const t = window.MmsSp ? MmsSp.errorText(e) : e.message;
     console.warn('[재고] 쉐어포인트 로그인 실패 — 재고는 갱신하지 않습니다:', e);
