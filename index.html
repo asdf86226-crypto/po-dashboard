@@ -650,6 +650,7 @@
   body.viewer #btnShareExport,
   body.viewer #btnTeamsSend,
   body.viewer #btnTeamsCfg,
+  body.viewer #btnAutoSnap,
   body.viewer #btnNewPo,
   body.viewer #btnNewDom,
   body.viewer #btnNewSupp,
@@ -756,6 +757,7 @@
           <button class="btn brass no-print" id="btnShareExport" style="padding:8px 14px; font-size:12.5px;" title="협력사/외부에 보낼 진행현황 페이지를 생성합니다 — 업체별로 품명·공급사·진행상태·생산/선적/통관 일자만 담기고, 금액·첨부문서 등 내부정보는 제외됩니다">🔗 진행현황 공유파일 내보내기</button>
           <button class="btn no-print" id="btnTeamsSend" style="padding:8px 14px; font-size:12.5px;" title="업체별 진행현황 요약을 팀즈 채널에 게시합니다 (수/금 오후 4시에 눌러 공유). 처음 누르면 팀즈 채널 수신 URL을 입력합니다.">📤 팀즈로 보내기</button>
           <button class="btn ghost no-print" id="btnTeamsCfg" style="padding:8px 10px; font-size:12.5px;" title="팀즈 수신 URL 설정/변경">⚙</button>
+          <button class="btn ghost no-print" id="btnAutoSnap" style="padding:8px 10px; font-size:12.5px;" title="자동 보내기 (화·금 9시 팀즈 · 월 9시 월별비용) 설정">⏰</button>
           <span class="stamp" id="stampDate"></span>
         </div>
       </div>
@@ -1548,6 +1550,7 @@ let approvalBatches = [];
 let suppliers = [];
 let memoNote = '';
 let teamsWebhookUrl = ''; // Teams 채널 수신 URL (Workflows/Incoming Webhook) — 이 기기에만 저장, 공유파일에는 포함되지 않음
+let autoSnapUrl = '';   // 자동 보내기용 파워오토메이트 '저장' 흐름 주소 — 이 기기에만 저장
 let sharedFileUrl = ''; // 팀즈 메시지 하단에 붙일 "상세 진행현황 보기" 링크 URL (SharePoint/OneDrive 등에 올린 공유 HTML의 주소)
 let editingPoId = null;
 let poPanelReturnToPiGroup = null; // PI그룹 팝업에서 건을 눌러 들어온 경우, 닫을 때 다시 그 그룹으로 되돌아가기 위한 값
@@ -1689,6 +1692,11 @@ async function loadData(){
       const r = await window.storage.get('sharedFileUrl', false);
       sharedFileUrl = r ? r.value : '';
     }catch(e){ sharedFileUrl = ''; }
+    try{
+      const r = await window.storage.get('autoSnapUrl', false);
+      autoSnapUrl = r ? r.value : '';
+    }catch(e){ autoSnapUrl = ''; }
+    autoSnapSoon(true);   // 열 때 한 번 — 자동 보내기 자료를 최신으로
   }else{
     pos = [];
     domesticPos = [];
@@ -1706,14 +1714,14 @@ async function saveFxRates(){
   try{ await window.storage.set('fxRates', JSON.stringify(fxRates), false); }catch(e){ console.error(e); }
 }
 async function savePos(){
-  pushPoStatusSoon();
+  pushPoStatusSoon(); autoSnapSoon();
   if(!hasStorage) return; // in-memory only; user backs up via 내보내기
   try{
     await window.storage.set('pos', JSON.stringify(pos), false);
   }catch(e){ console.error(e); }
 }
 async function saveDomesticPos(){
-  pushPoStatusSoon();
+  pushPoStatusSoon(); autoSnapSoon();
   if(!hasStorage) return;
   try{
     await window.storage.set('domesticPos', JSON.stringify(domesticPos), false);
@@ -2678,6 +2686,89 @@ function buildTeamsHtml(){
   html += '<p><i>색상: 🟠 생산중 &nbsp; 🟢 생산완료·공장입고 &nbsp; 🔵 선적·항구도착 &nbsp; ⚪ 발주준비</i></p>';
   return html;
 }
+/* ===================== 자동 보내기 (파워오토메이트) =====================
+ * 발주 자료는 이 브라우저에만 있어서, 정해진 시각에 대시보드가 닫혀 있으면 보낼 수 없다.
+ * 그래서 저장할 때마다(그리고 열 때) 보낼 내용을 미리 만들어 파워오토메이트 '저장' 흐름으로 보내 두고,
+ * 회사 쉐어포인트에 파일로 덮어쓴다. 예약 흐름이 그 파일을 읽어 보낸다.
+ *   화·금 09:00  팀즈 채널  ← 팀즈요약.html (📤 팀즈로 보내기와 같은 내용)
+ *   월   09:00  정향미 매니저님 팀즈 채팅 ← 월별비용.html
+ * 내용이 바뀌지 않았으면 다시 보내지 않는다. */
+let _autoSnapTimer = null, _autoSnapSent = '';
+function autoSnapSoon(force){
+  if(VIEWER || !autoSnapUrl) return;
+  if(force) _autoSnapSent = '';
+  clearTimeout(_autoSnapTimer); _autoSnapTimer = setTimeout(pushAutoSnap, 8000);
+}
+async function pushAutoSnap(){
+  if(VIEWER || !autoSnapUrl) return;
+  const body = { teamsHtml: buildTeamsHtml(), sharedHtml: buildSharedProgressHtml(), monthCostHtml: buildMonthCostTeamsHtml() };
+  // 시각 문구는 비교에서 빼야 '내용이 같으면 안 보냄'이 된다
+  const sig = JSON.stringify(body).replace(/\d{4}-\d{2}-\d{2} \d{2}:\d{2}/g, '');
+  if(sig === _autoSnapSent) return;
+  const d = new Date(), p2 = n => String(n).padStart(2,'0');
+  body.updatedAt = d.getFullYear()+'-'+p2(d.getMonth()+1)+'-'+p2(d.getDate())+' '+p2(d.getHours())+':'+p2(d.getMinutes());
+  try{
+    const r = await fetch(autoSnapUrl, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+    if(r.ok || r.status===202){ _autoSnapSent = sig; console.log('[자동 보내기] 최신 내용 저장', body.updatedAt); }
+    else console.warn('[자동 보내기] 저장 흐름 응답', r.status);
+  }catch(e){ console.warn('[자동 보내기] 저장 흐름 호출 실패:', e && e.message); }
+}
+function configureAutoSnap(){
+  const v = window.prompt('⏰ 자동 보내기 — 파워오토메이트 "발주현황 저장" 흐름의 HTTP URL을 붙여넣으세요.\n\n'
+    + '저장할 때마다 팀즈 요약 · 월별비용을 회사 쉐어포인트 파일로 덮어써 두고,\n'
+    + '예약 흐름이 화·금 9시(팀즈 채널) · 월 9시(정향미 매니저님)에 보냅니다.\n\n비우고 확인하면 자동 보내기를 끕니다.', autoSnapUrl || '');
+  if(v === null) return;
+  autoSnapUrl = v.trim();
+  if(hasStorage) window.storage.set('autoSnapUrl', autoSnapUrl, false).catch(()=>{});
+  if(autoSnapUrl){ _autoSnapSent = ''; pushAutoSnap().then(()=> toast(_autoSnapSent ? '자동 보내기를 켰습니다 — 최신 내용을 저장했습니다' : '저장 흐름 호출에 실패했습니다 (F12 콘솔 확인)', 4000)); }
+  else toast('자동 보내기를 껐습니다');
+}
+// 월별비용 → 팀즈 메시지용 HTML (팀즈는 인라인 스타일을 지우므로 표 · 굵게 · 이모지만 쓴다)
+function buildMonthCostTeamsHtml(){
+  const esc = s => String(s==null?'':s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[c]);
+  const d = new Date(), p2 = n => String(n).padStart(2,'0');
+  const stamp = d.getFullYear()+'-'+p2(d.getMonth()+1)+'-'+p2(d.getDate())+' '+p2(d.getHours())+':'+p2(d.getMinutes());
+  const todayMonth = isoDate(d).slice(0,7);
+  const list = getActiveMonthCostList();
+  const section = (title, items) => {
+    const months = {};
+    items.forEach(it => { if(!it.payMonth) return; (months[it.payMonth] = months[it.payMonth] || []).push(it); });
+    const keys = Object.keys(months).sort();
+    if(!keys.length) return '<h3>■ '+title+'</h3><p>진행중인 발주가 없습니다.</p>';
+    let total = 0;
+    const rows = keys.map(m => {
+      const sup = {};
+      months[m].forEach(it => {
+        const k = (it.supplier||'').trim() || '(공급사 미지정)';
+        const x = sup[k] || (sup[k] = {n:0, due:0, unknown:0});
+        x.n++; x.due += it.amountKrw; if(!(it.fullAmountKrw>0)) x.unknown++;
+      });
+      const sum = months[m].reduce((s,it)=>s+it.amountKrw, 0); total += sum;
+      const label = parseInt(m.slice(0,4),10)+'년 '+parseInt(m.slice(5),10)+'월' + (m < todayMonth ? ' ⚠지남' : '');
+      const sups = Object.entries(sup).sort((a,b)=>b[1].due-a[1].due);
+      return sups.map(([k,x], i) => '<tr>'
+        + '<td>'+(i===0 ? '<b>'+label+'</b><br>'+fmtKrw(sum) : '')+'</td>'   // 팀즈가 rowspan 을 깨뜨릴 수 있어 빈 칸으로
+        + '<td>'+esc(k)+'</td><td>'+x.n+'건</td>'
+        + '<td>'+(x.due>0 ? fmtKrw(x.due) : (x.unknown ? '' : '지급완료'))+(x.unknown ? ' 🟡금액 미정 '+x.unknown+'건' : '')+'</td></tr>').join('');
+    }).join('');
+    return '<h3>■ '+title+' · 합계 '+fmtKrw(total)+'</h3>'
+      + '<table border="1" cellpadding="6" cellspacing="0"><thead><tr><th>지급 예정월</th><th>공급사</th><th>건수</th><th>남은 지급 예정</th></tr></thead>'
+      + '<tbody>'+rows+'</tbody></table>';
+  };
+  let html = '<h2>💰 월별 예상 비용</h2>'
+    + '<p><b>'+stamp+'</b> 기준 · 아직 지급하지 않은 금액만 · 해외는 환율 환산(원화) · 국내는 입고월 다음 달 지급</p>'
+    + section('해외 발주', list.filter(x=>x.source==='overseas'))
+    + section('국내 발주', list.filter(x=>x.source==='domestic'));
+  const unpaid = getClosedUnpaidList();
+  if(unpaid.length){
+    const t = unpaid.reduce((s,it)=>s+it.amountKrw, 0);
+    html += '<h3>■ 🔴 ERP입력 완료 · 미지급 '+unpaid.length+'건 · '+fmtKrw(t)+'</h3>'
+      + '<table border="1" cellpadding="6" cellspacing="0"><thead><tr><th>건</th><th>공급사</th><th>미지급</th></tr></thead><tbody>'
+      + unpaid.map(it => '<tr><td>'+esc(payGroupKeyOf(it).label)+'</td><td>'+esc(it.supplier||'-')+'</td><td>'+fmtKrw(it.amountKrw)+'</td></tr>').join('')
+      + '</tbody></table>';
+  }
+  return html;
+}
 function sendToTeams(){
   if(!teamsWebhookUrl){ configureTeamsUrl(true); return; }
   if(pos.length===0){ toast('보낼 발주 건이 없습니다'); return; }
@@ -2711,6 +2802,8 @@ if(btnTeamsSend) btnTeamsSend.addEventListener('click', function(){
 });
 const btnTeamsCfg = document.getElementById('btnTeamsCfg');
 if(btnTeamsCfg) btnTeamsCfg.addEventListener('click', function(){ configureTeamsUrl(false); });
+const btnAutoSnap = document.getElementById('btnAutoSnap');
+if(btnAutoSnap) btnAutoSnap.addEventListener('click', configureAutoSnap);
 document.getElementById('fileImport').addEventListener('change', (e)=>{
   if(e.target.files[0]) importData(e.target.files[0]);
   e.target.value = '';
