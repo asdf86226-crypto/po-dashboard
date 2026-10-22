@@ -2744,8 +2744,11 @@ function buildMonthCostTeamsHtml(){
       const sup = {};
       months[m].forEach(it => {
         const k = (it.supplier||'').trim() || '(공급사 미지정)';
-        const x = sup[k] || (sup[k] = {n:0, due:0, unknown:0});
+        const x = sup[k] || (sup[k] = {n:0, due:0, unknown:0, pi:{}});
         x.n++; x.due += it.amountKrw; if(!(it.fullAmountKrw>0)) x.unknown++;
+        const pk = (it.piNo||'').trim() || 'PI 전';
+        const q = x.pi[pk] || (x.pi[pk] = {n:0, due:0});
+        q.n++; q.due += it.amountKrw;
       });
       const sum = months[m].reduce((s,it)=>s+it.amountKrw, 0); total += sum;
       const label = parseInt(m.slice(0,4),10)+'년 '+parseInt(m.slice(5),10)+'월' + (m < todayMonth ? ' ⚠지남' : '');
@@ -2753,10 +2756,13 @@ function buildMonthCostTeamsHtml(){
       return sups.map(([k,x], i) => '<tr>'
         + '<td>'+(i===0 ? '<b>'+label+'</b><br>'+fmtKrw(sum) : '')+'</td>'   // 팀즈가 rowspan 을 깨뜨릴 수 있어 빈 칸으로
         + '<td>'+esc(k)+'</td><td>'+x.n+'건</td>'
+        // PI별 건수 · 남은 금액 (PI 전 = 아직 PI를 못 받은 건)
+        + '<td>'+Object.entries(x.pi).sort((a,b)=>(a[0]==='PI 전')-(b[0]==='PI 전') || a[0].localeCompare(b[0]))
+            .map(([pn,q]) => (pn==='PI 전' ? 'PI 전' : esc(pn)) + ' · ' + q.n + '건' + (q.due>0 ? ' · ' + fmtKrw(q.due) : '')).join('<br>')+'</td>'
         + '<td>'+(x.due>0 ? fmtKrw(x.due) : (x.unknown ? '' : '지급완료'))+(x.unknown ? ' 🟡금액 미정 '+x.unknown+'건' : '')+'</td></tr>').join('');
     }).join('');
     return '<h3>■ '+title+' · 합계 '+fmtKrw(total)+'</h3>'
-      + '<table border="1" cellpadding="6" cellspacing="0"><thead><tr><th>지급 예정월</th><th>공급사</th><th>건수</th><th>남은 지급 예정</th></tr></thead>'
+      + '<table border="1" cellpadding="6" cellspacing="0"><thead><tr><th>지급 예정월</th><th>공급사</th><th>건수</th><th>PI</th><th>남은 지급 예정</th></tr></thead>'
       + '<tbody>'+rows+'</tbody></table>';
   };
   let html = '<h2>💰 월별 예상 비용</h2>'
