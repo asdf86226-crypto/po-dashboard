@@ -59,13 +59,13 @@
   body.viewer .brand .go-link{display:none}   /* 공유 열람용 화면에서는 숨김 */
   .brand .sub{font-size:12px; color:#aab7c6; margin-left:2px; font-family:var(--sans); font-weight:600; letter-spacing:.2px; border-left:1px solid #3a4a68; padding-left:12px;}
   .tabs{display:flex; gap:4px; flex-wrap:wrap; justify-content:flex-end;}
-  /* 제목줄 오른쪽 아래 — 쉐어포인트(MMS) 연결 상태 (구매요청 대시보드와 같은 모양·내용) */
-  .sp-top{flex-basis:100%; display:flex; justify-content:flex-end; align-items:center; gap:7px; margin-top:-2px;
-          font-size:11.5px; color:#aab7c6; font-family:var(--sans); line-height:1.5; text-align:right}
+  /* 제목줄 바깥 오른쪽 아래 — 쉐어포인트(MMS) 연결 상태 (구매요청 대시보드와 같은 모양·내용) */
+  .sp-top{display:flex; justify-content:flex-end; align-items:center; gap:7px; padding:7px 28px 0;
+          font-size:11.5px; color:var(--ink-soft); font-family:var(--sans); line-height:1.5; text-align:right}
   .sp-top:empty{display:none}
   .sp-top .dot{width:7px; height:7px; border-radius:50%; flex:none; background:#8a94a6}
-  .sp-top.on .dot{background:#34d399} .sp-top.off .dot{background:#fbbf24}
-  .sp-top b{color:#eef2f7; font-weight:700}
+  .sp-top.on .dot{background:#10b981} .sp-top.off .dot{background:#f59e0b}
+  .sp-top b{color:var(--ink); font-weight:700}
   body.viewer .sp-top{display:none}
   .stock-src{font-size:12px; color:var(--muted, #8a8476); align-self:center; white-space:nowrap}
   .stock-src.sp{color:#0f7a5a; font-weight:700}
@@ -731,8 +731,8 @@
     <div class="tab" data-view="supp">거래처</div>
     <div class="tab" data-view="dhl">DHL계정</div>
   </div>
-  <div class="sp-top" id="spTop" title="쉐어포인트(MMS) 자료 기준 시각 — 열 때마다 바뀐 재고가 있으면 자동으로 반영합니다"></div>
 </div>
+<div class="sp-top" id="spTop" title="쉐어포인트(MMS) 자료 기준 시각 — 열 때마다 바뀐 재고가 있으면 자동으로 반영합니다"></div>
 
 <div class="wrap">
 
