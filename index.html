@@ -2693,7 +2693,7 @@ function buildTeamsHtml(){
  *   화·금 09:00  팀즈 채널  ← 팀즈요약.html (📤 팀즈로 보내기와 같은 내용)
  *   월   09:00  정향미 매니저님 팀즈 채팅 ← 월별비용.html
  * 내용이 바뀌지 않았으면 다시 보내지 않는다. */
-let _autoSnapTimer = null, _autoSnapSent = '';
+let _autoSnapTimer = null, _autoSnapSent = '', _autoSnapErr = '';
 function autoSnapSoon(force){
   if(VIEWER || !autoSnapUrl) return;
   if(force) _autoSnapSent = '';
@@ -2709,9 +2709,13 @@ async function pushAutoSnap(){
   body.updatedAt = d.getFullYear()+'-'+p2(d.getMonth()+1)+'-'+p2(d.getDate())+' '+p2(d.getHours())+':'+p2(d.getMinutes());
   try{
     const r = await fetch(autoSnapUrl, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
-    if(r.ok || r.status===202){ _autoSnapSent = sig; console.log('[자동 보내기] 최신 내용 저장', body.updatedAt); }
-    else console.warn('[자동 보내기] 저장 흐름 응답', r.status);
-  }catch(e){ console.warn('[자동 보내기] 저장 흐름 호출 실패:', e && e.message); }
+    if(r.ok || r.status===202){ _autoSnapSent = sig; _autoSnapErr = ''; console.log('[자동 보내기] 최신 내용 저장', body.updatedAt); }
+    else{
+      let t = ''; try{ t = (await r.text()).slice(0, 300); }catch(e){}
+      _autoSnapErr = '응답 ' + r.status + (t ? ' · ' + t : '');
+      console.warn('[자동 보내기] 저장 흐름 응답', r.status, t);
+    }
+  }catch(e){ _autoSnapErr = (e && e.message) || '네트워크 오류'; console.warn('[자동 보내기] 저장 흐름 호출 실패:', e && e.message); }
 }
 function configureAutoSnap(){
   const v = window.prompt('⏰ 자동 보내기 — 파워오토메이트 "발주현황 저장" 흐름의 HTTP URL을 붙여넣으세요.\n\n'
@@ -2720,7 +2724,7 @@ function configureAutoSnap(){
   if(v === null) return;
   autoSnapUrl = v.trim();
   if(hasStorage) window.storage.set('autoSnapUrl', autoSnapUrl, false).catch(()=>{});
-  if(autoSnapUrl){ _autoSnapSent = ''; pushAutoSnap().then(()=> toast(_autoSnapSent ? '자동 보내기를 켰습니다 — 최신 내용을 저장했습니다' : '저장 흐름 호출에 실패했습니다 (F12 콘솔 확인)', 4000)); }
+  if(autoSnapUrl){ _autoSnapSent = ''; pushAutoSnap().then(()=> toast(_autoSnapSent ? '자동 보내기를 켰습니다 — 최신 내용을 저장했습니다' : '저장 흐름 호출 실패 — ' + _autoSnapErr, 12000)); }
   else toast('자동 보내기를 껐습니다');
 }
 // 월별비용 → 팀즈 메시지용 HTML (팀즈는 인라인 스타일을 지우므로 표 · 굵게 · 이모지만 쓴다)
