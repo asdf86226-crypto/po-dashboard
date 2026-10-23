@@ -2330,6 +2330,8 @@ function sharedStatusOf(p){
   // 예외: 예정일(prodDueDate)조차 없고 CI만 있으면 실무상 생산이 끝났다고 간주 (구 데이터 호환).
   if(p.prodDoneDate)                     return ['생산완료','st-made'];
   if(p.ciDate && !p.prodDueDate)         return ['생산완료','st-made'];
+  // PI는 받았지만 선금을 아직 안 보냈으면 공장이 생산을 시작하지 않는다 → 발주진행 (선금 0%면 바로 생산중)
+  if(p.piDate && !isDepositDone(p) && (parseFloat(p.depositPct)||0) > 0) return ['발주진행','st-ord'];
   if(p.piDate)                            return ['생산중','st-prod'];
   return ['발주준비','st-prep'];
 }
@@ -2372,7 +2374,7 @@ function buildSharedProgressHtml(){
     if(da!==db) return da.localeCompare(db);
     return (a.itemName||'').localeCompare(b.itemName||'');
   });
-  const counts = {'st-prep':0,'st-prod':0,'st-made':0,'st-ship':0,'st-port':0,'st-in':0};
+  const counts = {'st-prep':0,'st-ord':0,'st-prod':0,'st-made':0,'st-ship':0,'st-port':0,'st-in':0};
   function itemRow(p){
     const st = sharedStatusOf(p); counts[st[1]] = (counts[st[1]]||0)+1;
     const search = [p.itemName,p.itemCode,p.supplier,p.piNo,p.ciNo].join(' ').toLowerCase();
@@ -2447,7 +2449,7 @@ function buildSharedProgressHtml(){
     return head + items.map(domItemRow).join('');
   }).join('');
   const chip = function(label,key,color,cnts){ return '<span class="sum-chip"><i style="background:'+color+'"></i>'+label+' <b>'+((cnts||counts)[key]||0)+'</b></span>'; };
-  const summary = chip('생산중','st-prod','#d97706')+chip('생산완료','st-made','#0d9488')
+  const summary = chip('발주진행','st-ord','#7c3aed')+chip('생산중','st-prod','#d97706')+chip('생산완료','st-made','#0d9488')
                 + chip('선적완료','st-ship','#0284c7')+chip('항구도착','st-port','#2563eb')
                 + chip('공장입고','st-in','#16a34a')+chip('발주준비','st-prep','#94a3b8');
   const domSummary = chip('발주진행','st-ship','#0284c7',domCounts)+chip('생산중','st-prod','#d97706',domCounts)
@@ -2488,7 +2490,7 @@ function buildSharedProgressHtml(){
     + '.dash{color:#b7b2a3;}'
     + '.plan{color:#8a97a0;font-size:12px;}'
     + '.st{display:inline-block;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700;color:#fff;white-space:nowrap;}'
-    + '.st-prep{background:#94a3b8;}.st-prod{background:#d97706;}.st-made{background:#0d9488;}.st-ship{background:#0284c7;}.st-port{background:#2563eb;}.st-in{background:#16a34a;}'
+    + '.st-prep{background:#94a3b8;}.st-ord{background:#7c3aed;}.st-prod{background:#d97706;}.st-made{background:#0d9488;}.st-ship{background:#0284c7;}.st-port{background:#2563eb;}.st-in{background:#16a34a;}'
     + '.tg{display:inline-block;font-size:10px;font-weight:700;padding:1px 6px;border-radius:3px;margin-left:6px;color:#fff;vertical-align:middle;}'
     + '.tg-first{background:#3f7d8c;}.tg-sample{background:#8b5cf6;}.tg-urgent{background:#dc2626;}'
     + '.doc-wrap{display:inline-flex;gap:4px;flex-wrap:wrap;}'
@@ -2562,7 +2564,7 @@ if(btnShareExport) btnShareExport.addEventListener('click', exportSharedView);
 // ---------- Teams 진행현황 요약 전송 ----------
 // 업체별 진행현황 요약을 Adaptive Card 로 만들어 팀즈 채널 수신 URL(Workflows)로 게시한다.
 function buildTeamsSummaryText(){
-  const STK = [['st-prod','생산중'],['st-made','생산완료'],['st-ship','선적완료'],['st-port','항구도착'],['st-in','공장입고'],['st-prep','발주준비']];
+  const STK = [['st-ord','발주진행'],['st-prod','생산중'],['st-made','생산완료'],['st-ship','선적완료'],['st-port','항구도착'],['st-in','공장입고'],['st-prep','발주준비']];
   const total = pos.length;
   const overall = {};
   const bySup = {}; const supOrder = [];
@@ -2647,7 +2649,7 @@ function configureTeamsUrl(sendAfter){
 function buildTeamsHtml(){
   // stKey: [이름, 이모지(색 대체)]
   const STK = [
-    ['st-prod','생산중','🟠'], ['st-made','생산완료','🟢'],
+    ['st-ord','발주진행','🟣'], ['st-prod','생산중','🟠'], ['st-made','생산완료','🟢'],
     ['st-ship','선적완료','🔵'], ['st-port','항구도착','🔵'],
     ['st-in','공장입고','🟢'], ['st-prep','발주준비','⚪'],
   ];
@@ -2695,7 +2697,7 @@ function buildTeamsHtml(){
   if(sharedFileUrl){
     html += '<p>👉 <a href="'+esc(sharedFileUrl)+'"><b>📎 상세 진행현황 보기 (전체 목록 · 납기 · 생산/선적/통관 일자 · 문서 링크)</b></a></p>';
   }
-  html += '<p><i>색상: 🟠 생산중 &nbsp; 🟢 생산완료·공장입고 &nbsp; 🔵 선적·항구도착 &nbsp; ⚪ 발주준비</i></p>';
+  html += '<p><i>색상: 🟣 발주진행(PI 받고 선금 전) &nbsp; 🟠 생산중 &nbsp; 🟢 생산완료·공장입고 &nbsp; 🔵 선적·항구도착 &nbsp; ⚪ 발주준비</i></p>';
   return html;
 }
 /* ===================== 자동 보내기 (파워오토메이트) =====================
