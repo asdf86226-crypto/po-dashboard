@@ -2341,7 +2341,7 @@ function sharedDomStatusOf(p){
   if(p.qcDate)                                  return ['검수완료','st-in'];
   if(p.warehouseDate)                           return ['입고완료','st-made'];
   if(p.depositDate || p.depositDeferred)        return ['생산중','st-prod'];
-  if(p.depositPlannedDate || p.poAmount)        return ['발주진행','st-ship'];
+  if(p.depositPlannedDate || p.poAmount)        return ['발주진행','st-ord'];   // 해외 발주진행과 같은 색
   return ['발주준비','st-prep'];
 }
 function sharedDateCell(actual, planned){
@@ -2415,7 +2415,7 @@ function buildSharedProgressHtml(){
     if(da!==db) return da.localeCompare(db);
     return (a.itemName||'').localeCompare(b.itemName||'');
   });
-  const domCounts = {'st-prep':0,'st-ship':0,'st-prod':0,'st-made':0,'st-in':0};
+  const domCounts = {'st-prep':0,'st-ord':0,'st-prod':0,'st-made':0,'st-in':0};
   function domItemRow(p){
     const st = sharedDomStatusOf(p); domCounts[st[1]] = (domCounts[st[1]]||0)+1;
     const search = [p.itemName,p.itemCode,p.supplier].join(' ').toLowerCase();
@@ -2452,7 +2452,7 @@ function buildSharedProgressHtml(){
   const summary = chip('발주진행','st-ord','#7c3aed')+chip('생산중','st-prod','#d97706')+chip('생산완료','st-made','#0d9488')
                 + chip('선적완료','st-ship','#0284c7')+chip('항구도착','st-port','#2563eb')
                 + chip('공장입고','st-in','#16a34a')+chip('발주준비','st-prep','#94a3b8');
-  const domSummary = chip('발주진행','st-ship','#0284c7',domCounts)+chip('생산중','st-prod','#d97706',domCounts)
+  const domSummary = chip('발주진행','st-ord','#7c3aed',domCounts)+chip('생산중','st-prod','#d97706',domCounts)
                    + chip('입고완료','st-made','#0d9488',domCounts)+chip('검수완료','st-in','#16a34a',domCounts)
                    + chip('발주준비','st-prep','#94a3b8',domCounts);
   const pad = function(n){ return String(n).padStart(2,'0'); };
