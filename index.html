@@ -2330,8 +2330,9 @@ function sharedStatusOf(p){
   // 예외: 예정일(prodDueDate)조차 없고 CI만 있으면 실무상 생산이 끝났다고 간주 (구 데이터 호환).
   if(p.prodDoneDate)                     return ['생산완료','st-made'];
   if(p.ciDate && !p.prodDueDate)         return ['생산완료','st-made'];
-  // PI는 받았지만 선금을 아직 안 보냈으면 공장이 생산을 시작하지 않는다 → 발주진행 (선금 0%면 바로 생산중)
-  if(p.piDate && !isDepositDone(p) && (parseFloat(p.depositPct)||0) > 0) return ['발주진행','st-ord'];
+  // PI는 받았지만 선금 지급(또는 '입고 후 지급' 체크) 전 = 발주현황 단계 '②PI수령' → 발주진행.
+  // 선금이 없는 건(0%)도 같은 단계라 발주진행으로 본다 — 생산에 들어가면 '입고 후 지급'을 체크하거나 생산 일정으로 넘어간다.
+  if(p.piDate && !isDepositDone(p)) return ['발주진행','st-ord'];
   if(p.piDate)                            return ['생산중','st-prod'];
   return ['발주준비','st-prep'];
 }
