@@ -2756,32 +2756,46 @@ function buildMonthCostTeamsHtml(){
     if(!keys.length) return '<h3>■ '+title+'</h3><p>진행중인 발주가 없습니다.</p>';
     let total = 0;
     const rows = keys.map(m => {
+      // 공급사 → PI 별로 묶어 총금액 · 선금(지급했으면 지급액·지급일) · 남은 금액을 보여준다
       const sup = {};
       months[m].forEach(it => {
         const k = (it.supplier||'').trim() || '(공급사 미지정)';
-        const x = sup[k] || (sup[k] = {n:0, due:0, unknown:0, pi:{}});
-        x.n++; x.due += it.amountKrw; if(!(it.fullAmountKrw>0)) x.unknown++;
+        const x = sup[k] || (sup[k] = {due:0, pi:{}});
+        x.due += it.amountKrw;
         const pk = (it.piNo||'').trim() || 'PI 전';
-        const q = x.pi[pk] || (x.pi[pk] = {n:0, due:0});
+        const q = x.pi[pk] || (x.pi[pk] = {n:0, full:0, unknown:0, depPaid:0, depDates:[], depUnpaid:0, due:0});
         q.n++; q.due += it.amountKrw;
+        if(it.fullAmountKrw>0) q.full += it.fullAmountKrw; else q.unknown++;
+        if(it.depositAmountKrw>0){
+          if(it.depositPaid){ q.depPaid += it.depositAmountKrw; if(it.depositDate && q.depDates.indexOf(it.depositDate)<0) q.depDates.push(it.depositDate); }
+          else q.depUnpaid += it.depositAmountKrw;
+        }
       });
       const sum = months[m].reduce((s,it)=>s+it.amountKrw, 0); total += sum;
       const label = parseInt(m.slice(0,4),10)+'년 '+parseInt(m.slice(5),10)+'월' + (m < todayMonth ? ' ⚠지남' : '');
       const sups = Object.entries(sup).sort((a,b)=>b[1].due-a[1].due);
-      return sups.map(([k,x], i) => '<tr>'
-        + '<td>'+(i===0 ? '<b>'+label+'</b><br>'+fmtKrw(sum) : '')+'</td>'   // 팀즈가 rowspan 을 깨뜨릴 수 있어 빈 칸으로
-        + '<td>'+esc(k)+'</td><td>'+x.n+'건</td>'
-        // PI별 건수 · 남은 금액 (PI 전 = 아직 PI를 못 받은 건)
-        + '<td>'+Object.entries(x.pi).sort((a,b)=>(a[0]==='PI 전')-(b[0]==='PI 전') || a[0].localeCompare(b[0]))
-            .map(([pn,q]) => (pn==='PI 전' ? 'PI 전' : esc(pn)) + ' · ' + q.n + '건' + (q.due>0 ? ' · ' + fmtKrw(q.due) : '')).join('<br>')+'</td>'
-        + '<td>'+(x.due>0 ? fmtKrw(x.due) : (x.unknown ? '' : '지급완료'))+(x.unknown ? ' 🟡금액 미정 '+x.unknown+'건' : '')+'</td></tr>').join('');
+      let first = true;
+      return sups.map(([k,x]) => Object.entries(x.pi)
+        .sort((a,b)=>(a[0]==='PI 전')-(b[0]==='PI 전') || a[0].localeCompare(b[0]))
+        .map(([pn,q], pi) => {
+          const md = first ? '<b>'+label+'</b><br>'+fmtKrw(sum) : '';   // 팀즈가 rowspan 을 깨뜨릴 수 있어 빈 칸으로
+          first = false;
+          const dep = q.depPaid>0 ? fmtKrw(q.depPaid)+'<br>('+q.depDates.sort().map(d=>d.slice(5).replace('-','/')).join(', ')+' 지급)'
+                    : (q.depUnpaid>0 ? '미지급 '+fmtKrw(q.depUnpaid) : '-');
+          const left = q.due>0 ? '<b>'+fmtKrw(q.due)+'</b>' : (q.unknown ? '' : '✅ 지급완료');
+          return '<tr><td>'+md+'</td>'
+            + '<td>'+(pi===0 ? esc(k) : '')+'</td>'
+            + '<td>'+(pn==='PI 전' ? 'PI 전' : esc(pn))+'</td><td>'+q.n+'건</td>'
+            + '<td>'+(q.full>0 ? fmtKrw(q.full) : '')+(q.unknown ? (q.full>0?'<br>':'')+'🟡금액 미정 '+q.unknown+'건' : '')+'</td>'
+            + '<td>'+dep+'</td><td>'+left+'</td></tr>';
+        }).join('')).join('');
     }).join('');
-    return '<h3>■ '+title+' · 합계 '+fmtKrw(total)+'</h3>'
-      + '<table border="1" cellpadding="6" cellspacing="0"><thead><tr><th>지급 예정월</th><th>공급사</th><th>건수</th><th>PI</th><th>남은 지급 예정</th></tr></thead>'
+    return '<h3>■ '+title+' · 남은 금액 합계 '+fmtKrw(total)+'</h3>'
+      + '<table border="1" cellpadding="6" cellspacing="0"><thead><tr><th>지급 예정월</th><th>공급사</th><th>PI</th><th>건수</th><th>총금액</th><th>선금 지급</th><th>남은 금액</th></tr></thead>'
       + '<tbody>'+rows+'</tbody></table>';
   };
   let html = '<h2>💰 월별 예상 비용</h2>'
-    + '<p><b>'+stamp+'</b> 기준 · 해외 발주 · 아직 지급하지 않은 금액만 · 환율 환산(원화)</p>'
+    + '<p><b>'+stamp+'</b> 기준 · 해외 발주 · PI별 총금액 · 선금 지급 · 남은 금액 · 환율 환산(원화)</p>'
     + section('해외 발주', list.filter(x=>x.source==='overseas'));   // 재무팀(정향미 매니저님)은 해외 건만
   const unpaid = getClosedUnpaidList().filter(it=>it.source==='overseas');
   if(unpaid.length){
