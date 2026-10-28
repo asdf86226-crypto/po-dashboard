@@ -1236,6 +1236,7 @@
           <div style="font-size:12px; font-weight:700; color:var(--ink-soft); margin-bottom:6px;">수입품 입고처리 (플로우텍 구매 → 태성 판매 → 태성 구매)</div>
           <div id="poImpStatus" style="font-size:12px; color:var(--ink-soft); margin-bottom:8px; line-height:1.7;">—</div>
           <button type="button" class="btn ghost" id="poImpSendBtn" style="width:100%;">📤 입고처리 전송 (3건)</button>
+          <button type="button" class="btn ghost" id="poImpFOnlyBtn" style="width:100%; margin-top:6px;" title="태성으로 넘기지 않고 플로우텍 구매(입고)만 입력합니다">📤 플로우텍 구매입력만 (1건)</button>
         </div>
         <div class="panel-actions">
           <button type="button" class="btn ghost" id="poCancelBtn">취소</button>
@@ -5624,7 +5625,8 @@ function erpBadge(p){
   if(!p) return '';
   const imp = p.ecountImport || {};
   const impBadge = (imp.fPurchase && imp.fSale && imp.tPurchase)
-    ? '<span class="item-badge" style="background:#7c3aed;" title="플로우텍 구매 #'+imp.fPurchase+' · 판매 #'+imp.fSale+' · 태성 구매 #'+imp.tPurchase+'">태성입고 ✓</span>' : '';
+    ? '<span class="item-badge" style="background:#7c3aed;" title="플로우텍 구매 #'+imp.fPurchase+' · 판매 #'+imp.fSale+' · 태성 구매 #'+imp.tPurchase+'">태성입고 ✓</span>'
+    : (imp.fOnly && imp.fPurchase ? '<span class="item-badge" style="background:#0284c7;" title="플로우텍 구매입력만 #'+imp.fPurchase+' — 태성으로 넘기지 않음">플로우텍입고 ✓</span>' : '');
   return erpPoBadge(p) + impBadge;
 }
 function erpPoBadge(p){
@@ -6627,16 +6629,23 @@ function refreshImportRow(id){
     head = '<div style="color:#b45309; font-weight:700;">공장입고일을 입력하고 저장하면 전송할 수 있어요.</div>';
   }else if(done === IMPORT_STEPS.length){
     head = '<div style="color:#16a34a; font-weight:700;">📦 입고처리 완료 (3건 모두 전송)' + (imp.at ? ' · ' + imp.at : '') + '</div>';
+  }else if(imp.fOnly && imp.fPurchase){
+    head = '<div style="color:#0284c7; font-weight:700;">📦 플로우텍 구매입력만 완료' + (imp.at ? ' · ' + imp.at : '') + ' — 태성으로 넘기지 않음</div>';
   }
   statusEl.innerHTML = head + lines.join('<br>')
     + (done ? '<div style="margin-top:6px;"><a href="#" data-clear-import="1" style="font-size:11px; color:#dc2626; text-decoration:underline;">입고처리 전송기록 삭제</a></div>' : '');
   btn.disabled = !p.warehouseDate || done === IMPORT_STEPS.length;
   btn.textContent = done === 0 ? '📤 입고처리 전송 (3건)'
-                  : done < IMPORT_STEPS.length ? '📤 남은 단계 이어서 전송 (' + (IMPORT_STEPS.length - done) + '건)'
+                  : done < IMPORT_STEPS.length ? (imp.fOnly ? '📤 태성까지 이어서 전송 (' : '📤 남은 단계 이어서 전송 (') + (IMPORT_STEPS.length - done) + '건)'
                   : '✅ 전송 완료';
+  // 플로우텍 구매입력만 — 아직 아무 단계도 안 보냈을 때만
+  const fb = document.getElementById('poImpFOnlyBtn');
+  if(fb){ fb.style.display = imp.fPurchase ? 'none' : ''; fb.disabled = !p.warehouseDate; }
 }
 
-async function sendImportFromPanel(){
+// onlyF: 태성으로 넘기지 않고 ① 플로우텍 구매입력만
+async function sendImportFromPanel(onlyF){
+  onlyF = onlyF === true;
   const chk = ecountRelayStatus();
   if(!chk.ok){ toast(chk.msg, 7000); return; }
   const id = editingPoId;
@@ -6647,8 +6656,8 @@ async function sendImportFromPanel(){
   try{ built = buildImportPayloads(p); }catch(e){ toast(e.message, 7000); return; }
   const {pr, ioDate, steps} = built;
   p.ecountImport = p.ecountImport || {};
-  const todo = IMPORT_STEPS.filter(s => !p.ecountImport[s.key]);
-  if(!todo.length){ toast('이미 3건 모두 전송했습니다.'); return; }
+  const todo = IMPORT_STEPS.filter(s => !p.ecountImport[s.key] && (!onlyF || s.key === 'fPurchase'));
+  if(!todo.length){ toast(onlyF ? '이미 플로우텍 구매입력을 전송했습니다.' : '이미 3건 모두 전송했습니다.'); return; }
 
   const sym = pr.currency === 'CNY' ? '¥' : '$';
   const won = v => '₩' + Number(v).toLocaleString();
@@ -6659,10 +6668,11 @@ async function sendImportFromPanel(){
     (pr.usedCi ? '' : '⚠️ CI금액이 없어 PI금액으로 계산합니다\n') + '\n' +
     (p.ecountImport.fPurchase ? '' : '① 플로우텍 구매입력 (' + (p.supplier||'') + ')\n   외화 ' + sym + Number(pr.amtF).toLocaleString(undefined,{maximumFractionDigits:2}) + ' × 환율 ' + pr.rate + ' = ' + won(pr.amtKrw) + ' · 부가세 없음\n'
       + (steps.fPurchase.data.ORD_NO ? '   발주서 ' + steps.fPurchase.data.ORD_DATE + '-' + steps.fPurchase.data.ORD_NO + ' 와 연결 (발주서 종결)\n' : '')) +
+    (onlyF ? '\n※ 태성정밀로는 넘기지 않습니다 (②③ 없음)\n' :
     (p.ecountImport.fSale ? '' : '② 플로우텍 판매입력 (→ 태성정밀)\n') +
     (p.ecountImport.tPurchase ? '' : '③ 태성 구매입력 (← 플로우텍)\n') +
     '   ②③ 판매단가 ' + won(pr.saleUnit) + ' (입고원가 ' + won(pr.costUnit) + ' ÷ 0.7, 100원 올림)\n' +
-    '   공급가액 ' + won(pr.saleSupply) + ' · 부가세 ' + won(pr.saleVat) + '\n';
+    '   공급가액 ' + won(pr.saleSupply) + ' · 부가세 ' + won(pr.saleVat) + '\n');
   if(!confirm(msg)) return;
 
   const btn = document.getElementById('poImpSendBtn');
@@ -6681,9 +6691,11 @@ async function sendImportFromPanel(){
       refreshImportRow(id);
     }
     p.ecountImport.at = nowLocalStr();
+    if(onlyF) p.ecountImport.fOnly = true;
+    else delete p.ecountImport.fOnly;
     await savePos();
     render();
-    toast('✅ 입고처리 전송 완료 (' + sent + '건)', 6000);
+    toast(onlyF ? '✅ 플로우텍 구매입력 완료 (태성으로는 넘기지 않음)' : '✅ 입고처리 전송 완료 (' + sent + '건)', 6000);
   }catch(err){
     console.error('[입고처리 실패]', err);
     toast('❌ ' + (err && err.message || '전송 실패') + (sent ? ' · 앞의 ' + sent + '건은 입력됨, 다시 누르면 남은 단계만 진행' : ''), 10000);
@@ -6691,7 +6703,8 @@ async function sendImportFromPanel(){
     refreshImportRow(id);
   }
 }
-document.getElementById('poImpSendBtn').addEventListener('click', sendImportFromPanel);
+document.getElementById('poImpSendBtn').addEventListener('click', () => sendImportFromPanel(false));
+document.getElementById('poImpFOnlyBtn').addEventListener('click', () => sendImportFromPanel(true));
 // 입고처리 전송기록만 지우기 — 이카운트에서 전표를 직접 지운 뒤 대시보드를 맞추는 용도
 document.addEventListener('click', async (e) => {
   const a = e.target.closest && e.target.closest('a[data-clear-import]');
