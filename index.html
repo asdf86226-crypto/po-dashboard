@@ -59,6 +59,14 @@
   body.viewer .brand .go-link{display:none}   /* 공유 열람용 화면에서는 숨김 */
   .brand .sub{font-size:12px; color:#aab7c6; margin-left:2px; font-family:var(--sans); font-weight:600; letter-spacing:.2px; border-left:1px solid #3a4a68; padding-left:12px;}
   .tabs{display:flex; gap:4px; flex-wrap:wrap; justify-content:flex-end;}
+  /* 수입서류 칸 — 파일을 끌어다 놓거나 📎 로 골라 구글드라이브에 올리고 링크를 채운다 */
+  .doc-up{display:flex; gap:6px; align-items:center}
+  .doc-up input{flex:1; min-width:0}
+  .doc-up .doc-pick{flex:none; border:1px solid var(--line); background:#fff; border-radius:6px; padding:6px 9px; cursor:pointer; font-size:13px; line-height:1}
+  .doc-up .doc-pick:hover{background:#f1f5f9}
+  .doc-up .doc-pick:disabled{opacity:.6; cursor:wait}
+  .doc-up.drag input{outline:2px dashed #0f6cbd; outline-offset:2px; background:#eef6ff}
+  body.viewer .doc-up .doc-pick{display:none}
   /* 제목줄 바깥 오른쪽 아래 — 쉐어포인트(MMS) 연결 상태 (구매요청 대시보드와 같은 모양·내용) */
   .sp-top{display:flex; justify-content:flex-end; align-items:center; gap:7px; padding:7px 28px 0;
           font-size:11.5px; color:var(--ink-soft); font-family:var(--sans); line-height:1.5; text-align:right}
@@ -4280,6 +4288,69 @@ async function autoSyncCiFields(){
   render();
   toast(`같은 CI번호를 쓰는 ${toUpdate.length}건에도 선적·항구도착·통관·잔금 정보를 자동 반영했습니다`);
 }
+/* ===================== 수입서류 올리기 =====================
+ * PI · CI · BL · PL · 원산지증명서 칸에 파일을 끌어다 놓거나 📎 로 고르면,
+ * 구매요청 대시보드의 구글 Apps Script 가 내 구글드라이브 '수입서류/공급사/PI번호' 폴더에 올리고 링크를 돌려준다.
+ * 링크를 직접 붙여넣는 것도 그대로 된다. 이미 링크가 있으면 바꿀지 먼저 묻는다. */
+const DOC_UP = { piDocUrl:'PI', ciDocUrl:'CI', blDocUrl:'BL', plDocUrl:'PL', coDocUrl:'CO' };
+const DOC_MAX = 25 * 1024 * 1024;
+function fileToBase64(file){
+  return new Promise((ok, bad) => { const r = new FileReader();
+    r.onload = () => ok(String(r.result).split(',')[1] || ''); r.onerror = () => bad(r.error); r.readAsDataURL(file); });
+}
+async function uploadDoc(input, file, btn){
+  const url = reqGetUrl();
+  if(!url){ toast('먼저 📥 구매요청 및 재고 가져오기를 한 번 눌러 구매요청 대시보드와 연결해 주세요', 6000); return; }
+  if(file.size > DOC_MAX){ toast('파일이 너무 큽니다 (25MB까지)'); return; }
+  if(input.value && !confirm('이미 링크가 있습니다. 새 파일 링크로 바꿀까요?\n\n지금 링크: ' + input.value)) return;
+  const kind = DOC_UP[input.name];
+  const f = input.form.elements;
+  const supplier = (f.supplier && f.supplier.value) || '';
+  const pi = (f.piNo && f.piNo.value.trim()) || '';
+  const ref = (kind === 'PI' ? pi : (f.ciNo && f.ciNo.value.trim())) || pi;
+  const name = kind + (ref ? '_' + ref : '') + '_' + file.name;
+  const old = btn.textContent; btn.disabled = true; btn.textContent = '⏳';
+  try{
+    const data = await fileToBase64(file);
+    const r = await fetch(url, { method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'},
+      body: JSON.stringify({ action:'uploadDoc', supplier, pi, name, mime:file.type || 'application/octet-stream', data }) });
+    let res = null; try{ res = await r.json(); }catch(e){}
+    if(res && res.ok && res.url){
+      input.value = res.url;
+      input.dispatchEvent(new Event('input', { bubbles:true }));
+      input.dispatchEvent(new Event('change', { bubbles:true }));
+      toast('✅ ' + kind + ' 문서를 구글드라이브에 올렸습니다 — 저장을 누르면 반영됩니다', 4000);
+    }else if(res && res.ok){
+      toast('구글 Apps Script 코드가 예전 버전입니다 — 구매요청 대시보드의 새 코드를 붙여넣고 다시 배포해 주세요', 8000);
+    }else{
+      toast('올리기 실패 — ' + ((res && res.error) || ('응답 ' + r.status)), 8000);
+    }
+  }catch(e){
+    toast('올리기 실패 — ' + (e && e.message || '네트워크 오류'), 8000);
+  }finally{ btn.disabled = false; btn.textContent = old; }
+}
+function setupDocUploads(form){
+  if(!form || VIEWER) return;
+  Object.keys(DOC_UP).forEach(nm => {
+    const input = form.elements[nm]; if(!input || input.dataset.up) return;
+    input.dataset.up = '1';
+    const wrap = document.createElement('div'); wrap.className = 'doc-up';
+    input.parentNode.insertBefore(wrap, input); wrap.appendChild(input);
+    const pick = document.createElement('input'); pick.type = 'file'; pick.hidden = true;
+    pick.accept = '.pdf,.jpg,.jpeg,.png,.xlsx,.xls,.doc,.docx';
+    const btn = document.createElement('button'); btn.type = 'button'; btn.className = 'doc-pick';
+    btn.textContent = '📎'; btn.title = '파일을 골라 구글드라이브에 올리고 링크를 채웁니다 (칸에 끌어다 놓아도 됩니다)';
+    wrap.appendChild(btn); wrap.appendChild(pick);
+    input.placeholder = '파일을 끌어다 놓거나 📎 · 링크 붙여넣기';
+    btn.addEventListener('click', () => pick.click());
+    pick.addEventListener('change', () => { const f0 = pick.files[0]; pick.value = ''; if(f0) uploadDoc(input, f0, btn); });
+    ['dragenter','dragover'].forEach(ev => wrap.addEventListener(ev, e => { e.preventDefault(); wrap.classList.add('drag'); }));
+    ['dragleave','drop'].forEach(ev => wrap.addEventListener(ev, e => { e.preventDefault(); wrap.classList.remove('drag'); }));
+    wrap.addEventListener('drop', e => { const f0 = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]; if(f0) uploadDoc(input, f0, btn); });
+  });
+}
+setupDocUploads(poForm);
+
 poForm.addEventListener('input', (e)=>{
   if(e.target.name==='piAmount' || e.target.name==='depositPct' || e.target.name==='ciAmount' || e.target.name==='currencyPi' || e.target.name==='currencyCi') updateComputedPreview();
   // PI섹션/CI섹션의 통화 선택은 서로 같은 선택을 해야 하는 값이므로, 한쪽을 누르면 다른 쪽도 같이 맞춰준다
