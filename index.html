@@ -2725,7 +2725,8 @@ function autoSnapSoon(force){
 }
 async function pushAutoSnap(){
   if(VIEWER || !autoSnapUrl) return;
-  const body = { teamsHtml: buildTeamsHtml(), sharedHtml: buildSharedProgressHtml(), monthCostHtml: buildMonthCostTeamsHtml() };
+  const body = { teamsHtml: buildTeamsHtml(), sharedHtml: buildSharedProgressHtml(), monthCostHtml: buildMonthCostTeamsHtml(),
+                 poJson: buildPoJsonForAsk() };
   // 시각 문구는 비교에서 빼야 '내용이 같으면 안 보냄'이 된다
   const sig = JSON.stringify(body).replace(/\d{4}-\d{2}-\d{2} \d{2}:\d{2}/g, '');
   if(sig === _autoSnapSent) return;
@@ -2750,6 +2751,17 @@ function configureAutoSnap(){
   if(hasStorage) window.storage.set('autoSnapUrl', autoSnapUrl, false).catch(()=>{});
   if(autoSnapUrl){ _autoSnapSent = ''; pushAutoSnap().then(()=> toast(_autoSnapSent ? '자동 보내기를 켰습니다 — 최신 내용을 저장했습니다' : '저장 흐름 호출 실패 — ' + _autoSnapErr, 12000)); }
   else toast('자동 보내기를 껐습니다');
+}
+// '물어보기' 대시보드(회사 사람 누구나)가 입고 예정을 답할 수 있게 넘기는 발주 목록.
+// 품목 · 공급사 · 수량 · 입고 예정일 · 진행 상태만 — 금액 · 결제 · PI/CI 번호는 넣지 않는다.
+function buildPoJsonForAsk(){
+  const items = [];
+  const add = (p, kind, status) => items.push({
+    kind, code: p.itemCode || '', name: p.itemName || '', supplier: p.supplier || '', qty: parseFloat(p.qty) || 0,
+    eta: p.warehousePlanned || p.etaDate || p.etaPlanned || p.dueDate || '', wh: p.warehouseDate || '', status });
+  pos.forEach(p => add(p, '해외', sharedStatusOf(p)[0]));
+  domesticPos.forEach(p => add(p, '국내', sharedDomStatusOf(p)[0]));
+  return JSON.stringify({ at: isoDate(new Date()), items });
 }
 // 월별비용(해외 발주만) → 팀즈 메시지용 HTML (팀즈는 인라인 스타일을 지우므로 표 · 굵게 · 이모지만 쓴다)
 function buildMonthCostTeamsHtml(){
