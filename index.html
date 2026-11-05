@@ -3279,6 +3279,9 @@ function getFilteredPos(){
   return filtered.sort((a,b)=>{
     const d = sortDateOf(b).localeCompare(sortDateOf(a));
     if(d !== 0) return d;
+    // 같은 날 요청한 건은 공급사끼리 붙여서 (공급사 미지정은 맨 뒤)
+    const sA = (a.supplier||'').trim(), sB = (b.supplier||'').trim();
+    if(sA !== sB) return !sA ? 1 : !sB ? -1 : sA.localeCompare(sB, 'ko');
     const gA = groupKeyOf(a), gB = groupKeyOf(b);
     if(gA !== gB) return gA.localeCompare(gB); // 같은 정렬기준일이면 그룹끼리 흩어지지 않도록 묶어줌
     return (b.reqDate||'').localeCompare(a.reqDate||'');
@@ -5370,7 +5373,11 @@ function getFilteredDom(){
   if(domDoneFilter){
     filtered = filtered.filter(p=> (computeDomStageIndex(p) === 5) === (domDoneFilter === 'done'));
   }
-  return filtered.sort((a,b)=> (b.reqDate||'').localeCompare(a.reqDate||''));
+  // 최근 요청일 순 — 같은 날 요청한 건은 공급사끼리 붙여서 (공급사 미지정은 맨 뒤)
+  return filtered.sort((a,b)=> (b.reqDate||'').localeCompare(a.reqDate||'') || (()=>{
+    const sA = (a.supplier||'').trim(), sB = (b.supplier||'').trim();
+    return sA === sB ? 0 : !sA ? 1 : !sB ? -1 : sA.localeCompare(sB, 'ko');
+  })());
 }
 
 function renderDomTable(){
