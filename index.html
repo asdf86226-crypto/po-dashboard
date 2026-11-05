@@ -1922,6 +1922,7 @@ function reqToDom(r, supplier){
     itemCode: r.code || '',
     itemName: r.itemName || '',
     qty: r.qty || '',
+    srcQty: r.qty || '',                         // 가져올 때의 요청 수량 — 구매요청에서 바뀌면 알려 준다
     stock: stock==null ? '' : stock,
     dueDate: r.dueDate || '',
     reqDate: r.createdAt || '',
@@ -1940,6 +1941,7 @@ function reqToPo(r){
     itemCode: r.code || '',
     itemName: r.itemName || '',
     qty: r.qty || '',
+    srcQty: r.qty || '',                         // 가져올 때의 요청 수량 — 구매요청에서 바뀌면 알려 준다
     stock: stock==null ? '' : stock,              // ERP 재고현황 (품목코드 기준 매번 덮어쓰기)
     dueDate: r.dueDate || '',
     reqDate: r.createdAt || '',
@@ -2100,6 +2102,37 @@ async function autoStockSync(){
 document.addEventListener('visibilitychange', () => {
   if(document.visibilityState === 'visible' && Date.now() - stockAutoAt > 30*60*1000) autoStockSync();
 });
+// 구매요청 대시보드에서 수량을 고친 건을 찾아, 발주현황의 수량도 같이 바꿀지 묻는다.
+// 비교 기준은 '가져올 때의 요청 수량(srcQty)' — 발주현황에서 일부러 바꾼 수량은 요청이 바뀌지 않는 한 건드리지 않는다.
+// 예전에 가져온 건(srcQty 없음)은 지금 발주 수량과 비교한다. '아니오'를 누른 수량은 다시 묻지 않는다.
+async function syncReqQty(rows){
+  const num = v => { const n = parseFloat(String(v==null?'':v).replace(/,/g,'')); return isFinite(n) ? n : null; };
+  const byId = {}; rows.forEach(r => { if(r.id) byId[String(r.id)] = r; });
+  const changes = [];
+  const scan = (list, isDom) => list.forEach(p => {
+    const r = p.srcId && byId[p.srcId]; if(!r) return;
+    const want = num(r.qty); if(want == null) return;
+    const base = num(p.srcQty != null && p.srcQty !== '' ? p.srcQty : p.qty);
+    if(base === want || num(p.srcQtySkip) === want) return;
+    const started = isDom ? computeDomStageIndex(p) > 0 : computeStageIndex(p) > 0;
+    changes.push({ p, isDom, from: num(p.qty), to: want, started });
+  });
+  scan(pos, false); scan(domesticPos, true);
+  if(!changes.length) return 0;
+  const fmtN = n => n == null ? '-' : n.toLocaleString();
+  const lines = changes.slice(0, 15).map(c => '· ' + (c.isDom ? '[국내] ' : '[해외] ') + (c.p.itemCode || '') + ' ' + (c.p.itemName || '').slice(0, 20)
+    + '  ' + fmtN(c.from) + ' → ' + fmtN(c.to) + (c.started ? '  ⚠ 이미 진행중(PI·발주금액 있음)' : ''));
+  const msg = '구매요청 대시보드에서 요청 수량이 바뀐 건이 ' + changes.length + '건 있습니다.\n\n' + lines.join('\n')
+    + (changes.length > 15 ? '\n… 외 ' + (changes.length - 15) + '건' : '')
+    + '\n\n발주현황의 수량도 똑같이 바꿀까요?\n(취소를 누르면 그대로 두고, 이 수량으로는 다시 묻지 않습니다)';
+  const ok = confirm(msg);
+  changes.forEach(c => {
+    if(ok){ c.p.qty = String(c.to); c.p.srcQty = String(c.to); delete c.p.srcQtySkip; }
+    else c.p.srcQtySkip = String(c.to);
+  });
+  if(ok) toast('요청 수량에 맞춰 ' + changes.length + '건의 발주 수량을 바꿨습니다', 5000);
+  return changes.length;
+}
 async function pullPurchaseRequests(){
   let url = reqGetUrl();
   if(!url){
@@ -2171,6 +2204,10 @@ async function pullPurchaseRequests(){
     else{ const el = document.getElementById('stockSrcNote'); if(el){ el.textContent = stockSrc; el.classList.remove('sp'); } }
     if(haveAny) stockUpdated = applyStockMap(stockByCode, erpKnownCodes);
 
+    // ── 요청 수량 연동 ── 이미 가져온 건의 구매요청 수량이 바뀌었으면 발주 수량도 바꿀지 묻는다
+    const qtySynced = await syncReqQty(rows);
+    if(qtySynced){ await savePos(); await saveDomesticPos(); render(); }
+
     // 이미 가져온 건은 제외 (해외/국내 양쪽 모두 확인)
     const seen = new Set([].concat(pos, domesticPos).map(p=>p.srcId).filter(Boolean));
     const fresh = rows.filter(r => r.id && !seen.has(String(r.id)) && (r.code || r.itemName));
@@ -2179,7 +2216,7 @@ async function pullPurchaseRequests(){
         await savePos(); await saveDomesticPos();
         render();
         toast('재고 ' + stockUpdated + '건을 갱신했습니다 (새 구매요청 없음, 전체 ' + rows.length + '건)\n' + stockSrc, 6000);
-      }else{
+      }else if(!qtySynced){
         toast('새로 가져올 구매요청이 없습니다 (전체 ' + rows.length + '건, 모두 등록됨)\n' + stockSrc + ' · 바뀐 재고 없음', 6000);
       }
       return;
