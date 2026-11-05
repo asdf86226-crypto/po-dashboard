@@ -2824,7 +2824,7 @@ function buildMonthCostTeamsHtml(){
         const q = x.pi[pk] || (x.pi[pk] = {n:0, full:0, unknown:0, depPaid:0, depDates:[], depUnpaid:0, due:0});
         q.n++; q.due += it.amountKrw;
         if(it.fullAmountKrw>0) q.full += it.fullAmountKrw; else q.unknown++;
-        if(it.depositAmountKrw>0){
+        if(it.depositAmountKrw>0 && it.part !== 'bal'){   // 잔금 줄에는 선금(다른 달)을 다시 적지 않는다
           if(it.depositPaid){ q.depPaid += it.depositAmountKrw; if(it.depositDate && q.depDates.indexOf(it.depositDate)<0) q.depDates.push(it.depositDate); }
           else q.depUnpaid += it.depositAmountKrw;
         }
@@ -3522,6 +3522,22 @@ function finalDomAmountKrw(p){
 }
 // 종결(ERP입력완료)되지 않았고 납기요청일이 있는 건만 대상 — 해외/국내 통합
 // 발주 1건 → 월별비용 계산용 항목으로 변환 (해외/국내 공용)
+// 해외 발주 — 선금·잔금이 실제로 나갈 날짜를 가장 최근에 확인한 날짜로 어림한다.
+// 업체와 확인하며 생산완료·선적·입항 날짜를 고치면 월별비용의 달도 따라 움직인다.
+//   잔금: 잔금 지급(예정)일 > (입고 후 지급이면 입고·입항 쪽, 아니면 선적·생산 쪽 날짜) > 납기요청일
+//   선금: 선금 지급(예정)일 > PI 수령일 > 납기요청일
+const PAY_BASIS = {
+  bal:    [['balanceDate','잔금 지급'],['balancePlannedDate','잔금 지급 예정'],['shipDate','선적'],['shipPlannedDate','선적 예정'],
+           ['prodDoneDate','생산완료'],['prodDueDate','생산완료 예정'],['etaDate','입항'],['etaPlanned','입항 예정'],
+           ['warehouseDate','입고'],['warehousePlanned','입고 예정'],['dueDate','납기요청']],
+  balAfter:[['balanceDate','잔금 지급'],['balancePlannedDate','잔금 지급 예정'],['warehouseDate','입고'],['warehousePlanned','입고 예정'],
+           ['etaDate','입항'],['etaPlanned','입항 예정'],['shipDate','선적'],['shipPlannedDate','선적 예정'],['dueDate','납기요청']],
+  dep:    [['depositDate','선금 지급'],['depositPlannedDate','선금 지급 예정'],['piDate','PI 수령'],['dueDate','납기요청']],
+};
+function payEstimate(p, kind){
+  for(const [k, label] of PAY_BASIS[kind]){ if(p[k]) return { date:p[k], basis: label + ' ' + String(p[k]).slice(5).replace('-','/') + ' 기준' }; }
+  return { date:'', basis:'날짜 없음' };
+}
 function toMonthCostItem(p, source){
   const isOverseas = source==='overseas';
   const cur = p.currency||'USD';
@@ -3546,10 +3562,30 @@ function toMonthCostItem(p, source){
     // 어느 달 비용으로 볼지
     //   해외: 납기요청일의 달
     //   국내: 대금은 입고월 다음 달 말일에 나간다 → 잔금지급 예정일 > 입고일 다음 달 > (입고 전) 입고요청일 다음 달
-    payMonth: isOverseas ? (p.dueDate||'').slice(0,7)
+    payMonth: isOverseas ? '' /* overseasMonthParts 에서 정한다 */
             : ((p.balancePlannedDate||'').slice(0,7)
                || (p.warehouseDate ? nextMonthOf(p.warehouseDate) : (p.dueDate ? nextMonthOf(p.dueDate) : ''))),
+    payBasis: '',
   };
+}
+// 해외 발주 1건 → 월별비용 항목. 선금·잔금이 둘 다 남았고 나갈 달이 다르면 두 줄(선금 · 잔금)로 나눈다.
+function overseasMonthParts(p){
+  const it = toMonthCostItem(p, 'overseas');
+  const bal = payEstimate(p, p.balanceDeferred ? 'balAfter' : 'bal');
+  const dep = payEstimate(p, 'dep');
+  const depLeft = !it.depositPaid && it.depositAmountKrw > 0;
+  const balLeft = !it.balancePaid && it.balanceAmountKrw > 0;
+  if(depLeft && balLeft && dep.date.slice(0,7) && bal.date.slice(0,7) && dep.date.slice(0,7) !== bal.date.slice(0,7)){
+    return [
+      Object.assign({}, it, { part:'dep', amountKrw: it.depositAmountKrw, payMonth: dep.date.slice(0,7), payBasis: '선금 · ' + dep.basis }),
+      Object.assign({}, it, { part:'bal', amountKrw: it.balanceAmountKrw, payMonth: bal.date.slice(0,7), payBasis: '잔금 · ' + bal.basis }),
+    ];
+  }
+  // 한 달에 몰아서 — 선금만 남았으면 선금 날짜, 아니면 잔금 날짜(다 냈으면 마지막 지급일)
+  const use = (depLeft && !balLeft) ? dep : bal;
+  it.payMonth = use.date.slice(0,7);
+  it.payBasis = use.basis;
+  return [it];
 }
 // 'YYYY-MM-DD' → 다음 달 말일 'YYYY-MM-DD' (국내발주 잔금지급 예정일 기본값)
 function endOfNextMonth(dateStr){
@@ -3591,7 +3627,7 @@ function payGroupKeyOf(it){
 // 국내발주: 입고된 건은 입고월 다음 달 지급 예정으로 넣는다. ERP입력까지 끝났어도 아직 지급 전이면 그 달에 남긴다.
 function getActiveMonthCostList(){
   return [
-    ...pos.filter(p=>computeStageIndex(p)!==9 && p.dueDate).map(p=>toMonthCostItem(p,'overseas')),
+    ...pos.filter(p=>computeStageIndex(p)!==9).flatMap(overseasMonthParts),
     ...domesticPos.filter(p=>{
       if(p.warehouseDate) return computeDomStageIndex(p)!==5 || toMonthCostItem(p,'domestic').amountKrw>0;
       return computeDomStageIndex(p)!==5 && p.dueDate;
@@ -3676,7 +3712,7 @@ function renderMonthCostSection(source, items, listElId, emptyElId, grandElId){
       const maxDue = Math.max(1, ...sups.map(x=>x.due));
       const itemLine = it=>{
         const ref = it.source==='overseas'
-          ? [it.ciNo?`CI ${it.ciNo}`:'', it.piNo?`PI ${it.piNo}`:''].filter(Boolean).join(' · ')
+          ? [it.payBasis||'', it.ciNo?`CI ${it.ciNo}`:'', it.piNo?`PI ${it.piNo}`:''].filter(Boolean).join(' · ')
           : (it.warehouseDate?`입고 ${it.warehouseDate}`:`입고요청 ${it.dueDate||'-'}`);
         const paid = [it.depositPaid?`선금 ${it.depositDate||''} 지급`:'', it.balancePaid?`잔금 ${it.balanceDate||''} 지급`:''].filter(Boolean).join(' · ');
         return `<div class="mc-it" data-id="${it.id}" data-source="${it.source}">
@@ -3807,7 +3843,7 @@ function openMonthCostDetail(key){
     <div class="day-item" data-id="${it.id}" data-source="${it.source}">
       <div class="info">
         <span class="name">${it.itemName || '(품명 미입력)'}${it.itemCode ? `<span style="font-weight:700; font-size:13.5px; color:#b7bec7; margin-left:6px;">/ ${it.itemCode}</span>` : ''}</span>
-        <span class="sub">${it.supplier||'-'} · ${it.source==='overseas' ? `납기 ${it.dueDate||'-'}`
+        <span class="sub">${it.supplier||'-'} · ${it.source==='overseas' ? (it.payBasis || `납기 ${it.dueDate||'-'}`)
           : it.warehouseDate ? `입고 ${it.warehouseDate} → 잔금예정 ${it.balancePlannedDate||'다음 달 말일'}`
           : `입고요청 ${it.dueDate||'-'} → ${it.balancePlannedDate ? '잔금예정 '+it.balancePlannedDate : '다음 달 말일 지급 예정'}`} · ${it.source==='overseas'?'해외':'국내'}${paidNote?' · '+paidNote:''}</span>
       </div>
