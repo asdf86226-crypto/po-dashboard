@@ -1672,6 +1672,7 @@ async function loadData(){
     showStockSrc(null, false);
     renderSpTop();                     // 지난번 연결 상태를 먼저 보여 주고
     setTimeout(autoStockSync, 1500);   // 화면을 먼저 그린 뒤 쉐어포인트 재고를 조용히 반영
+    setTimeout(() => autoReceiveSync(false), 4000);   // 이카운트 구매입력(입고)을 보고 입고일 자동 반영
     pushPoStatusSoon();   // 열 때 한 번 — 다른 PC에서 고친 내용도 구매요청 화면에 맞춘다
     try{
       const r = await window.storage.get('approvalBatches', false);
@@ -2253,6 +2254,7 @@ document.addEventListener('DOMContentLoaded', ()=>{
     b.addEventListener('click', async () => {
       await pullPurchaseRequests();
       await runErpStatusSync();   // ERP에 전송한 발주서가 입고처리(종결)됐는지 확인
+      await autoReceiveSync(true);  // 구매현황(구매입력)으로 입고일 자동 반영
     });
     // 우클릭 시 연결 주소 변경
     b.addEventListener('contextmenu', (e)=>{
@@ -5721,8 +5723,86 @@ function erpBadge(p){
     : (imp.fOnly && imp.fPurchase ? '<span class="item-badge" style="background:#0284c7;" title="플로우텍 구매입력만 #'+imp.fPurchase+' — 태성으로 넘기지 않음">플로우텍입고 ✓</span>' : '');
   return erpPoBadge(p) + impBadge;
 }
+/* ===================== 입고 자동 반영 =====================
+ * MMS 가 매시간 쉐어포인트에 올리는 '구매현황_전체'에는 구매입력 때 끌어온 발주서 번호('불러온전표일자-No.')가 있다.
+ * 대시보드에서 이카운트로 보낸 발주서(ecountPoSlip = 'YYYYMMDD-번호')를 끌어온 구매입력을 찾아
+ *   · 다 들어왔으면 입고일(공장입고일) = 마지막 구매입력 일자 → 상태가 공장입고(국내는 입고완료)로 바뀐다
+ *   · 일부만 들어왔으면 '입고 300/500' 으로 표시만 하고 입고일은 비워 둔다
+ * 이미 직접 넣은 입고일은 건드리지 않는다. 해외 발주서는 플로우텍, 국내는 태성정밀 구매현황에서 찾는다. */
+const RECV_KEY = 'po_dash:recvSig';
+let recvBusy = false;
+function slipKey(v){
+  const m = String(v||'').match(/(\d{4})\D?(\d{1,2})\D?(\d{1,2})\s*-\s*(\d+)/);
+  return m ? m[1] + String(m[2]).padStart(2,'0') + String(m[3]).padStart(2,'0') + '-' + (+m[4]) : '';
+}
+const isoOfCell = v => {
+  if(v instanceof Date) return isoDate(v);
+  const n = parseFloat(v); if(isFinite(n) && n > 20000 && n < 80000) return isoDate(new Date(Date.UTC(1899,11,30) + Math.round(n)*86400000 + 12*3600000));
+  const m = String(v||'').match(/(\d{4})\D(\d{1,2})\D(\d{1,2})/); return m ? m[1]+'-'+String(m[2]).padStart(2,'0')+'-'+String(m[3]).padStart(2,'0') : '';
+};
+async function readPurchaseSlips(company){
+  await loadScriptOnce('vendor/xlsx.min.js');
+  const got = await MmsSp.download(MmsSp.reportPath(company, '구매현황_전체'), false);
+  const wb = XLSX.read(new Uint8Array(got.bytes), { type:'array', cellDates:true });
+  const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header:1, raw:true, defval:'' });
+  const norm = h => String(h||'').replace(/\s+/g,'');
+  const hi = rows.findIndex(r => r.some(c => norm(c) === '품목코드') && r.some(c => norm(c) === '수량'));
+  if(hi < 0) return {};
+  const h = rows[hi].map(norm);
+  const cD = h.indexOf('일자'), cC = h.indexOf('품목코드'), cQ = h.indexOf('수량');
+  const cS = h.findIndex(x => /전표일자|발주서일자/.test(x));   // 불러온전표일자-No.
+  if(cS < 0) return {};
+  const map = {};
+  for(let i = hi+1; i < rows.length; i++){
+    const r = rows[i], key = slipKey(r[cS]); if(!key) continue;
+    (map[key] = map[key] || []).push({ d: isoOfCell(r[cD]), c: String(r[cC]||'').trim(), q: parseFloat(String(r[cQ]).replace(/,/g,'')) || 0 });
+  }
+  return map;
+}
+async function autoReceiveSync(loud){
+  if(VIEWER || recvBusy || !window.MmsSp) return;
+  const targets = [].concat(pos.map(p => ({p, dom:false})), domesticPos.map(p => ({p, dom:true})))
+    .filter(t => t.p.ecountPoSlip && !t.p.warehouseDate);
+  if(!targets.length) return;
+  recvBusy = true;
+  try{
+    if(!(await MmsSp.signedIn())) return;
+    const need = [...new Set(targets.map(t => (t.p.ecountPoCompany || (t.dom ? 'taesung' : 'flowtech')) === 'taesung' ? '태성정밀' : '플로우텍'))];
+    const metas = {};
+    for(const co of need){ try{ metas[co] = await MmsSp.meta(MmsSp.reportPath(co, '구매현황_전체'), false); }catch(e){ if(e.status !== 404) throw e; } }
+    const sig = need.map(co => co + ':' + (metas[co] ? metas[co].eTag : '-')).join('|') + '|' + targets.map(t => t.p.id).join(',');
+    let last = ''; try{ last = localStorage.getItem(RECV_KEY) || ''; }catch(e){}
+    if(sig === last && !loud) return;                      // 구매현황도 대상도 그대로면 다시 읽지 않는다
+    const maps = {};
+    for(const co of need) if(metas[co]) maps[co] = await readPurchaseSlips(co);
+    let full = 0, part = 0;
+    targets.forEach(({p, dom}) => {
+      const co = (p.ecountPoCompany || (dom ? 'taesung' : 'flowtech')) === 'taesung' ? '태성정밀' : '플로우텍';
+      const lines = ((maps[co] || {})[slipKey(p.ecountPoSlip)] || []).filter(x => !p.itemCode || !x.c || x.c === String(p.itemCode).trim());
+      if(!lines.length) return;
+      const got = lines.reduce((s, x) => s + x.q, 0), want = parseFloat(p.qty) || 0;
+      const lastDate = lines.map(x => x.d).filter(Boolean).sort().pop() || '';
+      const prevQty = p.recvQty;
+      p.recvQty = got; p.recvDate = lastDate;
+      if(want > 0 && got >= want && lastDate){
+        p.warehouseDate = lastDate; p.recvAuto = true; full++;
+        if(dom && !p.balancePlannedDate && !p.balanceDate && (parseFloat(p.depositPct)||0) < 100) p.balancePlannedDate = endOfNextMonth(lastDate);
+      }else if(prevQty !== got) part++;
+    });
+    try{ localStorage.setItem(RECV_KEY, sig); }catch(e){}
+    if(full || part){
+      await savePos(); await saveDomesticPos(); render();
+      toast('📦 이카운트 구매입력 반영 — 입고 완료 ' + full + '건' + (part ? ' · 일부 입고 ' + part + '건' : '') + ' (구매현황 기준)', 7000);
+    }else if(loud) console.log('[입고 자동 반영] 새로 들어온 구매입력 없음');
+  }catch(e){
+    console.warn('[입고 자동 반영] 실패:', e);
+  }finally{ recvBusy = false; }
+}
 function erpPoBadge(p){
   if(!p || !p.ecountPoSlip) return '';
+  // 일부만 입고(구매입력) — 입고일은 비워 두고 받은 수량만 표시
+  if(!p.warehouseDate && p.recvQty > 0)
+    return '<span class="item-badge" style="background:#b45309;" title="이카운트 구매입력 기준 · 마지막 입고 '+(p.recvDate||'')+'">입고 '+Number(p.recvQty).toLocaleString()+'/'+Number(parseFloat(p.qty)||0).toLocaleString()+'</span>';
   if(p.ecountPoClosed) return '<span class="item-badge" style="background:#16a34a;" title="ECOUNT 발주서 종결 — 구매(입고)입력 완료 · 전표#'+p.ecountPoSlip+'">입고 ✓</span>';
   return '<span class="item-badge" style="background:#0d9488;" title="ECOUNT 발주서 전송완료 · 전표#'+p.ecountPoSlip+(p.ecountPoAt?' · '+p.ecountPoAt:'')+'">ERP ✓</span>';
 }
