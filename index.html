@@ -1308,7 +1308,7 @@
         </fieldset>
 
         <fieldset class="fieldset" id="dfs3">
-          <legend>③ 입고 / 잔금</legend>
+          <legend>③ 입고</legend>
           <div class="frow">
             <div class="fgroup"><label>입고 예정일</label><input type="date" name="warehousePlanned"></div>
             <div class="fgroup"><label>입고일</label><input type="date" name="warehouseDate"></div>
@@ -1324,7 +1324,8 @@
             </div>
             <div class="fgroup"></div>
           </div>
-          <div class="frow">
+          <!-- 국내발주 잔금(마감)은 담당이 아니라 화면에서 뺐다 — 값은 월별비용 계산용으로만 안에서 쓴다 -->
+          <div class="frow" style="display:none">
             <div class="fgroup"><label>잔금지급 예정일</label><input type="date" name="balancePlannedDate"></div>
             <div class="fgroup">
               <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:5px;">
@@ -1336,7 +1337,7 @@
               <input type="date" name="balanceDate">
             </div>
           </div>
-          <div class="frow">
+          <div class="frow" style="display:none">
             <div class="fgroup"><label>잔금 공유(정향미)</label>
               <div class="share-status" id="domBalanceSharedDisplay">미공유</div>
               <input type="hidden" name="balanceShared">
@@ -1535,7 +1536,6 @@ function stageLabelText(po, stageIdx, isDom){
     if(stageIdx===4 && po.balanceDeferred && !po.balanceDate) return '입고후지급예정(잔금)';
   }else{
     if(stageIdx===1 && po.depositDeferred && !po.depositDate) return '입고후지급예정(선금)';
-    if(stageIdx===3 && po.balanceDeferred && !po.balanceDate) return '입고후지급예정(잔금)';
   }
   return stripStageNum((isDom?DOM_STAGE_LABELS:STAGE_LABELS)[stageIdx]);
 }
@@ -3304,7 +3304,7 @@ function renderSupplierChips(kind){
   const curSup = kind === 'dom' ? domSupplierFilter : poSupplierFilter;
   const curDone = kind === 'dom' ? domDoneFilter : poDoneFilter;
   // 완료 = ERP입력완료 (해외 단계 9 · 국내 단계 5). 진행중과 완료를 두 줄로 나눠 공급사별 건수를 보여준다.
-  const isDone = p => kind === 'dom' ? computeDomStageIndex(p) === 5 : computeStageIndex(p) === 9;
+  const isDone = p => kind === 'dom' ? computeDomStageIndex(p) === DOM_DONE : computeStageIndex(p) === 9;
   const counts = {active:{}, done:{}}, tot = {active:0, done:0};
   list.forEach(p => {
     const st = isDone(p) ? 'done' : 'active', key = (p.supplier||'').trim();
@@ -3634,8 +3634,8 @@ function getActiveMonthCostList(){
   return [
     ...pos.filter(p=>computeStageIndex(p)!==9).flatMap(overseasMonthParts),
     ...domesticPos.filter(p=>{
-      if(p.warehouseDate) return computeDomStageIndex(p)!==5 || toMonthCostItem(p,'domestic').amountKrw>0;
-      return computeDomStageIndex(p)!==5 && p.dueDate;
+      if(p.warehouseDate) return computeDomStageIndex(p)!==DOM_DONE || toMonthCostItem(p,'domestic').amountKrw>0;
+      return computeDomStageIndex(p)!==DOM_DONE && p.dueDate;
     }).map(p=>toMonthCostItem(p,'domestic')),
   ];
 }
@@ -3644,7 +3644,7 @@ function getClosedUnpaidList(){
   return [
     ...pos.filter(p=>computeStageIndex(p)===9).map(p=>toMonthCostItem(p,'overseas')),
     // 입고된 국내발주는 직접 챙기는 지급이 아니라 월별 비용(입고월 다음 달)에서 보므로 여기서는 뺀다
-    ...domesticPos.filter(p=>computeDomStageIndex(p)===5 && !p.warehouseDate).map(p=>toMonthCostItem(p,'domestic')),
+    ...domesticPos.filter(p=>computeDomStageIndex(p)===DOM_DONE && !p.warehouseDate).map(p=>toMonthCostItem(p,'domestic')),
   ].filter(it=>it.amountKrw>0);
 }
 // 지급된 건들을 CI번호 기준으로 종합(같은 CI면 하나로 묶어서 합산)
@@ -5324,16 +5324,17 @@ document.getElementById('pocDownload').addEventListener('click', ()=>{
 });
 
 /* ---------------- 국내발주 (Domestic Orders) ---------------- */
-const DOM_STAGE_LABELS = ["①요청등록","②선금지급완료","③입고완료","④잔금지급완료","⑤품질검수완료","⑥ERP입력완료"];
-const DOM_STAGE_COLORS = ["#94a3b8","#d97706","#2563eb","#0d9488","#7c3aed","#16a34a"];
+const DOM_STAGE_LABELS = ["①요청등록","②선금지급완료","③입고완료","④품질검수완료","⑤ERP입력완료"];
+const DOM_STAGE_COLORS = ["#94a3b8","#d97706","#2563eb","#7c3aed","#16a34a"];
+const DOM_DONE = DOM_STAGE_LABELS.length - 1;   // 국내는 잔금 단계 없이 ERP입력완료가 끝
 function isDomDepositDone(po){ return !!po.depositDate || !!po.depositDeferred; }
 function isDomDepositShared(po){ return po.depositShared==='O'; }
 function isDomBalanceDone(po){ return !!po.balanceDate || !!po.balanceDeferred; }
 function computeDomStageIndex(po){
-  const milestones = [isDomDepositDone(po), po.warehouseDate, isDomBalanceDone(po), po.qcDate, po.erpDate];
+  const milestones = [isDomDepositDone(po), po.warehouseDate, po.qcDate, po.erpDate];
   let count = 0;
   milestones.forEach(m=>{ if(m) count++; });
-  return count; // 0..5
+  return count; // 0..4
 }
 function computeDomAmounts(po){
   const poAmt = parseFloat(po.poAmount)||0;
@@ -5373,7 +5374,7 @@ function getFilteredDom(){
     filtered = filtered.filter(p=> (p.supplier||'').trim() === domSupplierFilter);
   }
   if(domDoneFilter){
-    filtered = filtered.filter(p=> (computeDomStageIndex(p) === 5) === (domDoneFilter === 'done'));
+    filtered = filtered.filter(p=> (computeDomStageIndex(p) === DOM_DONE) === (domDoneFilter === 'done'));
   }
   // 최근 요청일 순 — 같은 날 요청한 건은 공급사끼리 붙여서 (공급사 미지정은 맨 뒤)
   return filtered.sort((a,b)=> (b.reqDate||'').localeCompare(a.reqDate||'') || (()=>{
@@ -5417,7 +5418,7 @@ function renderDomTable(){
       <td>${p.supplier||'-'}</td>
       <td class="money">${p.poAmount? fmtKrw(p.poAmount):'-'}</td>
       <td class="money">${p.poAmount? fmtKrw(deposit) + payTag(p,'deposit',deposit) :'-'}</td>
-      <td class="money">${p.poAmount? fmtKrw(balance) + payTag(p,'balance',balance) :'-'}</td>
+      <td class="money">${p.poAmount? fmtKrw(balance) :'-'}</td>
       <td>${p.dueDate||'-'}</td>
       <td><span class="badge" style="background:${DOM_STAGE_COLORS[stageIdx]}">${stageLabelText(p, stageIdx, true)}</span></td>
       <td>${p.warehouseDate||'-'}</td>
@@ -5451,12 +5452,10 @@ function renderDomTable(){
       <div class="ptcard">
         <div class="ptlabel">잔금액 (${filtered.length}건)</div>
         <div class="pt-line"><span class="pt-line-lbl">총</span><span class="ptval">${fmtKrw(balanceTotal)}</span></div>
-        <div class="pt-line"><span class="pt-line-lbl">지급됨</span><span class="ptval paid">${fmtKrw(balancePaid)}</span></div>
       </div>
       <div class="ptcard">
         <div class="ptlabel">선금+잔금 합계</div>
         <div class="pt-line"><span class="pt-line-lbl">총</span><span class="ptval">${fmtKrw(grandTotal)}</span></div>
-        <div class="pt-line"><span class="pt-line-lbl">미지급</span><span class="ptval unpaid">${fmtKrw(grandUnpaid)}</span></div>
       </div>
     `;
   }
