@@ -889,7 +889,7 @@
         <thead>
           <tr>
             <th>요청일</th><th>요청자</th><th>품명</th><th>품목코드</th><th>수량</th><th>공급사</th>
-            <th>발주금액(KRW)</th><th>선금액</th><th>잔금액</th><th>납기요청일</th><th>상태</th><th>입고일</th><th>특이사항</th>
+            <th>발주금액(KRW)</th><th>납기요청일</th><th>상태</th><th>입고일</th><th>특이사항</th>
           </tr>
         </thead>
         <tbody id="domTbody"></tbody>
@@ -1277,16 +1277,17 @@
         </fieldset>
 
         <fieldset class="fieldset" id="dfs2">
-          <legend>② 발주금액 / 선금</legend>
+          <legend>② 발주금액</legend>
           <div class="frow">
             <div class="fgroup"><label>단가 (KRW)<span style="display:block; font-weight:400; color:var(--ink-soft); text-transform:none; font-size:11px; margin-top:2px;">개당 매입가 (입력하면 발주금액 자동 계산)</span></label><input type="number" step="0.01" name="unitPrice" placeholder="예: 15000"></div>
             <div class="fgroup"><label>발주금액 (KRW)<span style="display:block; font-weight:400; color:var(--ink-soft); text-transform:none; font-size:11px; margin-top:2px;">단가 × 수량 자동 · 필요 시 직접 수정</span></label><input type="number" step="1" name="poAmount"></div>
           </div>
-          <div class="frow">
+          <!-- 국내발주는 선금이 없어 선금 칸을 숨긴다 (예전 자료 값은 그대로 둔다) -->
+          <div class="frow" style="display:none">
             <div class="fgroup"><label>선금 비율 (%)</label><input type="number" name="depositPct" placeholder="예: 30"></div>
             <div class="fgroup"></div>
           </div>
-          <div class="frow">
+          <div class="frow" style="display:none">
             <div class="fgroup"><label>선금지급 예정일</label><input type="date" name="depositPlannedDate"></div>
             <div class="fgroup">
               <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:5px;">
@@ -1298,7 +1299,7 @@
               <input type="date" name="depositDate">
             </div>
           </div>
-          <div class="frow">
+          <div class="frow" style="display:none">
             <div class="fgroup"><label>선금 공유(정향미)</label>
               <div class="share-status" id="domDepositSharedDisplay">미공유</div>
               <input type="hidden" name="depositShared">
@@ -1315,9 +1316,9 @@
           </div>
           <div class="frow">
             <div class="fgroup"><label style="color:#dc2626; font-weight:800;">실제 입고수량<span style="display:block; font-weight:800; color:#dc2626; text-transform:none; font-size:11px; margin-top:2px;">불량/재고 등으로 바뀐 경우만</span></label><input type="number" name="actualQty" min="0" placeholder="예: 950"></div>
-            <div class="fgroup"><label style="color:#dc2626; font-weight:800;">실제 입고금액 (KRW)<span style="display:block; font-weight:800; color:#dc2626; text-transform:none; font-size:11px; margin-top:2px;">입력 시 잔금에 자동 반영</span></label><input type="number" step="1" name="actualAmount" placeholder="예: 9500000"></div>
+            <div class="fgroup"><label style="color:#dc2626; font-weight:800;">실제 입고금액 (KRW)<span style="display:block; font-weight:800; color:#dc2626; text-transform:none; font-size:11px; margin-top:2px;">입력 시 발주금액 대신 사용</span></label><input type="number" step="1" name="actualAmount" placeholder="예: 9500000"></div>
           </div>
-          <div class="frow">
+          <div class="frow" style="display:none">
             <div class="fgroup"><label>입고 공유(정명재)</label>
               <div class="share-status" id="domWarehouseSharedDisplay">미공유</div>
               <input type="hidden" name="warehouseShared">
@@ -1357,7 +1358,7 @@
         <div class="fgroup"><label>특이사항</label><textarea name="note" rows="2" placeholder="이 발주 건의 특이사항을 적어주세요"></textarea></div>
         <div class="fgroup"><label>변경사항</label><textarea name="changeLog" rows="2" placeholder="일정/수량/금액 변경 등 이력을 적어주세요"></textarea></div>
 
-        <div class="computed">
+        <div class="computed" style="display:none">
           <span class="clabel-title">예상 선금 / 잔금 (KRW)</span>
           <b id="domComputedAmounts">₩0 / ₩0</b>
         </div>
@@ -1535,7 +1536,6 @@ function stageLabelText(po, stageIdx, isDom){
     if(stageIdx===2 && po.depositDeferred && !po.depositDate) return '입고후지급예정(선금)';
     if(stageIdx===4 && po.balanceDeferred && !po.balanceDate) return '입고후지급예정(잔금)';
   }else{
-    if(stageIdx===1 && po.depositDeferred && !po.depositDate) return '입고후지급예정(선금)';
   }
   return stripStageNum((isDom?DOM_STAGE_LABELS:STAGE_LABELS)[stageIdx]);
 }
@@ -2389,7 +2389,7 @@ function sharedStatusOf(p){
 function sharedDomStatusOf(p){
   if(p.qcDate)                                  return ['검수완료','st-in'];
   if(p.warehouseDate)                           return ['입고완료','st-made'];
-  if(p.depositDate || p.depositDeferred)        return ['생산중','st-prod'];
+  if(isDomOrdered(p))                           return ['생산중','st-prod'];
   if(p.depositPlannedDate || p.poAmount)        return ['발주진행','st-ord'];   // 해외 발주진행과 같은 색
   return ['발주준비','st-prep'];
 }
@@ -5324,17 +5324,20 @@ document.getElementById('pocDownload').addEventListener('click', ()=>{
 });
 
 /* ---------------- 국내발주 (Domestic Orders) ---------------- */
-const DOM_STAGE_LABELS = ["①요청등록","②선금지급완료","③입고완료","④품질검수완료","⑤ERP입력완료"];
+const DOM_STAGE_LABELS = ["①요청등록","②발주완료","③입고완료","④품질검수완료","⑤ERP입력완료"];
 const DOM_STAGE_COLORS = ["#94a3b8","#d97706","#2563eb","#7c3aed","#16a34a"];
 const DOM_DONE = DOM_STAGE_LABELS.length - 1;   // 국내는 잔금 단계 없이 ERP입력완료가 끝
 function isDomDepositDone(po){ return !!po.depositDate || !!po.depositDeferred; }
 function isDomDepositShared(po){ return po.depositShared==='O'; }
+// 발주완료 = 이카운트 발주서 전송(전표번호 있음). 예전에 선금지급일/입고 후 지급으로 넘겨 둔 건도 발주완료로 본다.
+function isDomOrdered(po){ return !!po.ecountPoSlip || !!po.depositDate || !!po.depositDeferred; }
 function isDomBalanceDone(po){ return !!po.balanceDate || !!po.balanceDeferred; }
 function computeDomStageIndex(po){
-  const milestones = [isDomDepositDone(po), po.warehouseDate, po.qcDate, po.erpDate];
-  let count = 0;
-  milestones.forEach(m=>{ if(m) count++; });
-  return count; // 0..4
+  // 국내는 선금이 없다 — 가장 멀리 간 단계를 보여 준다
+  if(po.erpDate) return 4;
+  if(po.qcDate) return 3;
+  if(po.warehouseDate) return 2;
+  return isDomOrdered(po) ? 1 : 0;
 }
 function computeDomAmounts(po){
   const poAmt = parseFloat(po.poAmount)||0;
@@ -5416,9 +5419,7 @@ function renderDomTable(){
       <td style="font-family:var(--sans)">${p.itemCode||'-'}${stockSubCell(p)}</td>
       <td style="font-family:var(--sans)">${p.actualQty && parseFloat(p.actualQty)!==parseFloat(p.qty) ? `<span style="color:#dc2626; text-decoration:line-through;">${fmtQty(p.qty)}</span> → <b style="color:#dc2626; font-size:14px;">${fmtQty(p.actualQty)}</b>` : fmtQty(p.qty)}</td>
       <td>${p.supplier||'-'}</td>
-      <td class="money">${p.poAmount? fmtKrw(p.poAmount):'-'}</td>
-      <td class="money">${p.poAmount? fmtKrw(deposit) + payTag(p,'deposit',deposit) :'-'}</td>
-      <td class="money">${p.poAmount? fmtKrw(balance) :'-'}</td>
+      <td class="money">${p.poAmount? fmtKrw(finalDomAmountKrw(p)):'-'}</td>
       <td>${p.dueDate||'-'}</td>
       <td><span class="badge" style="background:${DOM_STAGE_COLORS[stageIdx]}">${stageLabelText(p, stageIdx, true)}</span></td>
       <td>${p.warehouseDate||'-'}</td>
@@ -5445,17 +5446,9 @@ function renderDomTable(){
   }else{
     totalsEl.innerHTML = `
       <div class="ptcard">
-        <div class="ptlabel">선금액 (${filtered.length}건)</div>
-        <div class="pt-line"><span class="pt-line-lbl">총</span><span class="ptval">${fmtKrw(depositTotal)}</span></div>
-        <div class="pt-line"><span class="pt-line-lbl">지급됨</span><span class="ptval paid">${fmtKrw(depositPaid)}</span></div>
-      </div>
-      <div class="ptcard">
-        <div class="ptlabel">잔금액 (${filtered.length}건)</div>
-        <div class="pt-line"><span class="pt-line-lbl">총</span><span class="ptval">${fmtKrw(balanceTotal)}</span></div>
-      </div>
-      <div class="ptcard">
-        <div class="ptlabel">선금+잔금 합계</div>
-        <div class="pt-line"><span class="pt-line-lbl">총</span><span class="ptval">${fmtKrw(grandTotal)}</span></div>
+        <div class="ptlabel">발주금액 (${filtered.length}건)</div>
+        <div class="pt-line"><span class="pt-line-lbl">총</span><span class="ptval">${fmtKrw(filtered.reduce((t,p)=>t+finalDomAmountKrw(p),0))}</span></div>
+        <div class="pt-line"><span class="pt-line-lbl">입고됨</span><span class="ptval paid">${fmtKrw(filtered.filter(p=>p.warehouseDate).reduce((t,p)=>t+finalDomAmountKrw(p),0))}</span></div>
       </div>
     `;
   }
