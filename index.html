@@ -5729,7 +5729,7 @@ function erpBadge(p){
  *   · 다 들어왔으면 입고일(공장입고일) = 마지막 구매입력 일자 → 상태가 공장입고(국내는 입고완료)로 바뀐다
  *   · 일부만 들어왔으면 '입고 300/500' 으로 표시만 하고 입고일은 비워 둔다
  * 이미 직접 넣은 입고일은 건드리지 않는다. 해외 발주서는 플로우텍, 국내는 태성정밀 구매현황에서 찾는다. */
-const RECV_KEY = 'po_dash:recvSig';
+const RECV_KEY = 'po_dash:recvSig2';
 let recvBusy = false;
 function slipKey(v){
   const m = String(v||'').match(/(\d{4})\D?(\d{1,2})\D?(\d{1,2})\s*-\s*(\d+)/);
@@ -5738,8 +5738,18 @@ function slipKey(v){
 const isoOfCell = v => {
   if(v instanceof Date) return isoDate(v);
   const n = parseFloat(v); if(isFinite(n) && n > 20000 && n < 80000) return isoDate(new Date(Date.UTC(1899,11,30) + Math.round(n)*86400000 + 12*3600000));
-  const m = String(v||'').match(/(\d{4})\D(\d{1,2})\D(\d{1,2})/); return m ? m[1]+'-'+String(m[2]).padStart(2,'0')+'-'+String(m[3]).padStart(2,'0') : '';
+  const m = String(v||'').match(/(\d{4})\D(\d{1,2})\D(\d{1,2})/) || String(v||'').match(/^\s*(20\d{2})(\d{2})(\d{2})/);
+  return m ? m[1]+'-'+String(m[2]).padStart(2,'0')+'-'+String(m[3]).padStart(2,'0') : '';
 };
+// 입고가 끝난 건: 입고일 → 품질검수완료일·ERP입력일(구매입력일)·국내 잔금지급 예정일까지 빈 칸만 채운다
+function fillAfterReceive(p, date, dom){
+  let ch = false;
+  if(!p.warehouseDate){ p.warehouseDate = date; p.recvAuto = true; ch = true; }
+  if(!p.qcDate){ p.qcDate = date; ch = true; }
+  if(!p.erpDate){ p.erpDate = date; ch = true; }
+  if(dom && !p.balancePlannedDate && !p.balanceDate && (parseFloat(p.depositPct)||0) < 100){ p.balancePlannedDate = endOfNextMonth(p.warehouseDate); ch = true; }
+  return ch;
+}
 async function readPurchaseSlips(company){
   await loadScriptOnce('vendor/xlsx.min.js');
   const got = await MmsSp.download(MmsSp.reportPath(company, '구매현황_전체'), false);
@@ -5762,12 +5772,12 @@ async function readPurchaseSlips(company){
 async function autoReceiveSync(loud){
   if(VIEWER || recvBusy || !window.MmsSp) return;
   const targets = [].concat(pos.map(p => ({p, dom:false})), domesticPos.map(p => ({p, dom:true})))
-    .filter(t => t.p.ecountPoSlip && !t.p.warehouseDate);
+    .filter(t => t.p.ecountPoSlip && (!t.p.warehouseDate || (t.p.ecountPoClosed && (!t.p.qcDate || !t.p.erpDate))));
   if(!targets.length) return;
   recvBusy = true;
   try{
-    if(!(await MmsSp.signedIn())) return;
-    const need = [...new Set(targets.map(t => (t.p.ecountPoCompany || (t.dom ? 'taesung' : 'flowtech')) === 'taesung' ? '태성정밀' : '플로우텍'))];
+    const spOk = await MmsSp.signedIn().catch(() => false);   // 쉐어포인트 미연결이어도 '종결' 건은 채운다
+    const need = !spOk ? [] : [...new Set(targets.map(t => (t.p.ecountPoCompany || (t.dom ? 'taesung' : 'flowtech')) === 'taesung' ? '태성정밀' : '플로우텍'))];
     const metas = {};
     for(const co of need){ try{ metas[co] = await MmsSp.meta(MmsSp.reportPath(co, '구매현황_전체'), false); }catch(e){ if(e.status !== 404) throw e; } }
     const sig = need.map(co => co + ':' + (metas[co] ? metas[co].eTag : '-')).join('|') + '|' + targets.map(t => t.p.id).join(',');
@@ -5779,14 +5789,18 @@ async function autoReceiveSync(loud){
     targets.forEach(({p, dom}) => {
       const co = (p.ecountPoCompany || (dom ? 'taesung' : 'flowtech')) === 'taesung' ? '태성정밀' : '플로우텍';
       const lines = ((maps[co] || {})[slipKey(p.ecountPoSlip)] || []).filter(x => !p.itemCode || !x.c || x.c === String(p.itemCode).trim());
-      if(!lines.length) return;
+      const closedDate = p.ecountPoClosed ? (isoOfCell(p.ecountPoClosedAt) || isoDate(new Date())) : '';
+      if(!lines.length){
+        // 구매현황에서 못 찾았지만 이카운트 발주서가 종결(구매입력 완료)된 건 → 종결일로 채운다
+        if(closedDate && fillAfterReceive(p, p.warehouseDate || closedDate, dom)) full++;
+        return;
+      }
       const got = lines.reduce((s, x) => s + x.q, 0), want = parseFloat(p.qty) || 0;
       const lastDate = lines.map(x => x.d).filter(Boolean).sort().pop() || '';
       const prevQty = p.recvQty;
       p.recvQty = got; p.recvDate = lastDate;
-      if(want > 0 && got >= want && lastDate){
-        p.warehouseDate = lastDate; p.recvAuto = true; full++;
-        if(dom && !p.balancePlannedDate && !p.balanceDate && (parseFloat(p.depositPct)||0) < 100) p.balancePlannedDate = endOfNextMonth(lastDate);
+      if(((want > 0 && got >= want) || p.ecountPoClosed) && (lastDate || closedDate)){
+        if(fillAfterReceive(p, p.warehouseDate || lastDate || closedDate, dom)) full++;
       }else if(prevQty !== got) part++;
     });
     try{ localStorage.setItem(RECV_KEY, sig); }catch(e){}
