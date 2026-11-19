@@ -1155,10 +1155,6 @@
             <div class="fgroup"><label>CI수령일</label><input type="date" name="ciDate"></div>
           </div>
           <div class="frow">
-            <div class="fgroup"><label>생산완료일 <span style="font-weight:400; color:var(--ink-soft); text-transform:none;">(실제 생산 끝난 날 — CI를 미리 받은 경우 여기 비워두세요)</span></label><input type="date" name="prodDoneDate"></div>
-            <div class="fgroup"></div>
-          </div>
-          <div class="frow">
             <div class="fgroup"><label style="color:#dc2626; font-weight:800;">CI 수량<span style="display:block; font-weight:800; color:#dc2626; text-transform:none; font-size:11px; margin-top:2px;">불량/재고 등으로 바뀐 경우만</span></label><input type="number" name="ciQty" min="0" placeholder="예: 750"></div>
             <div class="fgroup"><label style="color:#dc2626; font-weight:800;">CI 금액<span style="display:block; font-weight:800; color:#dc2626; text-transform:none; font-size:11px; margin-top:2px;">입력 시 잔금에 자동 반영</span></label><input type="number" step="0.01" name="ciAmount" placeholder="예: 750.00"></div>
           </div>
@@ -1166,8 +1162,24 @@
             <label class="item-tag"><input type="radio" name="currencyCi" value="USD"> USD로 송금</label>
             <label class="item-tag"><input type="radio" name="currencyCi" value="CNY"> CNY(위안)로 송금</label>
           </div>
-          <div class="frow">
-            <div class="fgroup"><label>잔금지급 예정일</label><input type="date" name="balancePlannedDate"></div>
+          <div class="date-group" style="border:1px dashed var(--line); border-radius:8px; padding:10px 12px 0; margin-bottom:14px; background:#f7f9f8;">
+            <div style="font-size:12px; font-weight:800; color:var(--console-accent); margin-bottom:8px;">📅 예정일 — 한곳에서 입력</div>
+            <div class="frow">
+              <div class="fgroup"><label>잔금지급 예정일</label><input type="date" name="balancePlannedDate"></div>
+              <div class="fgroup"><label>선적 예정일</label><input type="date" name="shipPlannedDate"></div>
+            </div>
+            <div class="frow">
+              <div class="fgroup"><label>항구 도착 예정일</label><input type="date" name="etaPlanned"></div>
+              <div class="fgroup"><label>공장 입고 예정일 <span style="font-weight:400; color:var(--ink-soft); text-transform:none;">(자동: 영업일 +5일)</span></label><input type="date" name="warehousePlanned"></div>
+            </div>
+          </div>
+          <div class="date-group" style="border:1px dashed var(--line); border-radius:8px; padding:10px 12px 0; margin-bottom:14px;">
+            <div style="font-size:12px; font-weight:800; color:#16a34a; margin-bottom:8px;">✅ 실제 날짜 — 끝난 날 입력</div>
+            <div class="frow">
+              <div class="fgroup"><label>생산완료일 <span style="font-weight:400; color:var(--ink-soft); text-transform:none;">(CI를 미리 받았으면 비워두세요)</span></label><input type="date" name="prodDoneDate"></div>
+              <div class="fgroup"><label>선적일 <span style="font-weight:400; color:var(--ink-soft); text-transform:none;">(실제 선적된 날)</span></label><input type="date" name="shipDate"></div>
+            </div>
+            <div class="frow">
             <div class="fgroup">
               <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:5px;">
                 <label style="margin-bottom:0;">잔금지급일</label>
@@ -1177,18 +1189,11 @@
               </div>
               <input type="date" name="balanceDate">
             </div>
-          </div>
-          <div class="frow">
             <div class="fgroup"><label>잔금 공유(정향미)</label>
               <div class="share-status" id="balanceSharedDisplay">미공유</div>
               <input type="hidden" name="balanceShared">
             </div>
-            <div class="fgroup"><label>선적 예정일</label><input type="date" name="shipPlannedDate"></div>
-          </div>
-          <div class="fgroup"><label>선적일 <span style="font-weight:400; color:var(--ink-soft); text-transform:none;">(실제 선적된 날)</span></label><input type="date" name="shipDate"></div>
-          <div class="frow">
-            <div class="fgroup"><label>항구 도착 예정일</label><input type="date" name="etaPlanned"></div>
-            <div class="fgroup"><label>공장 입고 예정일 <span style="font-weight:400; color:var(--ink-soft); text-transform:none;">(자동: 영업일 +5일)</span></label><input type="date" name="warehousePlanned"></div>
+            </div>
           </div>
           <div class="frow">
             <div class="fgroup"><label>CI 문서 링크 <span style="font-weight:400; color:var(--ink-soft); text-transform:none;">(구글드라이브)</span></label><input type="url" name="ciDocUrl" placeholder="https://drive.google.com/..."></div>
