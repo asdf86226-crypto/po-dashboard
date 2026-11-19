@@ -2387,8 +2387,8 @@ function sharedStatusOf(p){
 // 국내발주: 통관/선적/CI 개념이 없어 상태 단계가 짧다.
 //   발주준비(요청만) → 발주진행(발주금액 확정 or 선금 예정) → 생산중(선금 실지급 또는 "입고후 지급" 체크) → 입고완료(입고일) → 검수완료(품질검수일)
 function sharedDomStatusOf(p){
-  if(p.qcDate)                                  return ['검수완료','st-in'];
-  if(p.warehouseDate)                           return ['입고완료','st-made'];
+  // 국내는 검수일이 입고 때 자동으로 같이 채워지므로 따로 '검수완료'로 나누지 않는다
+  if(p.warehouseDate || p.qcDate)               return ['입고완료','st-made'];
   if(isDomOrdered(p))                           return ['생산중','st-prod'];
   if(p.depositPlannedDate || p.poAmount)        return ['발주진행','st-ord'];   // 해외 발주진행과 같은 색
   return ['발주준비','st-prep'];
