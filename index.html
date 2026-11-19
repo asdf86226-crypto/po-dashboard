@@ -5833,8 +5833,10 @@ function getApprPendingPool(excludeBatchId){
   const overseas = pos.filter(p =>
     computeStageIndex(p) === 1 && (!p.approvalBatchId || p.approvalBatchId===excludeBatchId)
   ).map(p=>({source:'overseas', ref:p}));
+  // 국내: 선금이 없으므로 '발주금액 입력 + 아직 ERP 발주서 전송 전(요청등록)' 건. 지워진 결재기록을 가리키는 건도 다시 대상
+  const liveBatch = id => !!id && approvalBatches.some(b => b.id === id);
   const domestic = domesticPos.filter(p =>
-    p.poAmount !== '' && p.poAmount !== undefined && p.poAmount !== null && computeDomStageIndex(p) === 0 && (!p.approvalBatchId || p.approvalBatchId===excludeBatchId)
+    p.poAmount !== '' && p.poAmount !== undefined && p.poAmount !== null && computeDomStageIndex(p) === 0 && (!liveBatch(p.approvalBatchId) || p.approvalBatchId===excludeBatchId)
   ).map(p=>({source:'domestic', ref:p}));
   return [...overseas, ...domestic].sort((a,b)=> (b.ref.reqDate||'').localeCompare(a.ref.reqDate||''));
 }
@@ -5952,7 +5954,7 @@ function renderApprList(){
 
   let liveSection;
   if(items.length===0){
-    liveSection = `<div class="poc-empty">PI를 받았거나(해외) 발주금액이 입력된(국내) 건 중, 아직 선금이 나가지 않은 건이 없습니다.</div>`;
+    liveSection = `<div class="poc-empty">결재할 건이 없습니다. (해외: PI 받고 선금 전 · 국내: 발주금액 입력 후 ERP 발주서 전송 전)</div>`;
   }else{
     const table = buildApprItemTable(items, {selectable:false});
     liveSection = `
@@ -5971,7 +5973,7 @@ function renderApprList(){
   }
 
   el.innerHTML = `
-    <div class="cal-hint no-print">PI를 받아 단가가 확정된 건(해외)과 발주금액이 입력된 건(국내)이 자동으로 이 목록에 모입니다. 인쇄/PDF로 결재용 서류를 뽑아 올리세요. 선금 지급일이나 "입고 후 지급"이 체크된 건은 이 목록에서 자동으로 사라집니다.</div>
+    <div class="cal-hint no-print">PI를 받아 단가가 확정된 건(해외)과 발주금액이 입력된 건(국내)이 자동으로 이 목록에 모입니다. 인쇄/PDF로 결재용 서류를 뽑아 올리세요. 해외는 선금 지급일이나 "입고 후 지급"이 체크되면, 국내는 ERP 발주서를 전송하면 이 목록에서 자동으로 사라집니다.</div>
     ${liveSection}
 
     <div class="no-print" style="margin-top:32px;">
