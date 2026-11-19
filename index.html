@@ -4617,6 +4617,8 @@ document.getElementById('poDuplicateBtn').addEventListener('click', async ()=>{
   ];
   const dup = {...pos[idx]};
   resetFields.forEach(f=> dup[f] = '');
+  // 이카운트 입고처리 기록·자동 입고 수량은 이번 분할분 것이 아니므로 비운다 (발주서 전표번호는 남겨 같은 발주서에 이어서 연결)
+  ['ecountImport','recvQty','recvDate','recvAuto'].forEach(f=> delete dup[f]);
   dup.id = 'po_' + Date.now();
   dup.duplicatedFrom = editingPoId; // 분할입고 복제본임을 표시 — PI건수에는 안 잡히고 목록에서 화살표로만 표시됨
 
@@ -5792,9 +5794,14 @@ async function autoReceiveSync(loud){
     const maps = {};
     for(const co of need) if(metas[co]) maps[co] = await readPurchaseSlips(co);
     let full = 0, part = 0;
+    // 분할입고(건 복사)로 같은 발주서를 여러 건이 나눠 쓰면, 구매현황 수량을 어느 건 것인지 나눌 수 없다
+    // → 그런 건은 수량으로 판단하지 않고 '발주서 종결'일 때만 채운다
+    const slipUse = {};
+    [].concat(pos, domesticPos).forEach(x => { if(x.ecountPoSlip) slipUse[x.ecountPoSlip] = (slipUse[x.ecountPoSlip]||0) + 1; });
     targets.forEach(({p, dom}) => {
       const co = (p.ecountPoCompany || (dom ? 'taesung' : 'flowtech')) === 'taesung' ? '태성정밀' : '플로우텍';
-      const lines = ((maps[co] || {})[slipKey(p.ecountPoSlip)] || []).filter(x => !p.itemCode || !x.c || x.c === String(p.itemCode).trim());
+      const shared = slipUse[p.ecountPoSlip] > 1;
+      const lines = shared ? [] : ((maps[co] || {})[slipKey(p.ecountPoSlip)] || []).filter(x => !p.itemCode || !x.c || x.c === String(p.itemCode).trim());
       const closedDate = p.ecountPoClosed ? (isoOfCell(p.ecountPoClosedAt) || isoDate(new Date())) : '';
       if(!lines.length){
         // 구매현황에서 못 찾았지만 이카운트 발주서가 종결(구매입력 완료)된 건 → 종결일로 채운다
