@@ -1170,7 +1170,7 @@
             </div>
             <div class="frow">
               <div class="fgroup"><label>항구 도착 예정일</label><input type="date" name="etaPlanned"></div>
-              <div class="fgroup"><label>공장 입고 예정일 <span style="font-weight:400; color:var(--ink-soft); text-transform:none;">(자동: 영업일 +5일)</span></label><input type="date" name="warehousePlanned"></div>
+              <div class="fgroup"><label>공장 입고 예정일 <span style="font-weight:400; color:var(--ink-soft); text-transform:none;">(자동: 영업일 +2일)</span></label><input type="date" name="warehousePlanned"></div>
             </div>
           </div>
           <div class="date-group" style="border:1px dashed var(--line); border-radius:8px; padding:10px 12px 0; margin-bottom:14px;">
@@ -1663,6 +1663,13 @@ async function loadData(){
     try{
       const r = await window.storage.get('pos', false);
       pos = r ? JSON.parse(r.value) : [];
+      // 공장 입고 예정일 기준을 +5 → +2 영업일로 바꿈: 예전 자동값(+5) 그대로이고 아직 입고 전인 건만 다시 계산
+      let whFix = 0;
+      pos.forEach(p => {
+        if(p.warehouseDate || !p.etaPlanned || !p.warehousePlanned) return;
+        if(p.warehousePlanned === addBusinessDays(p.etaPlanned, 5)){ p.warehousePlanned = addBusinessDays(p.etaPlanned, WH_LEAD_DAYS); whFix++; }
+      });
+      if(whFix){ console.log('[공장 입고 예정일] +2영업일로 다시 계산:', whFix, '건'); setTimeout(savePos, 0); }
     }catch(e){ pos = []; }
     try{
       const r = await window.storage.get('domesticPos', false);
@@ -3505,6 +3512,8 @@ function renderSuppliers(){
 function isoDate(d){
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 }
+// 항구 도착 → 공장 입고까지 영업일 수
+const WH_LEAD_DAYS = 2;
 // 영업일(월~금) 기준으로 N일 뒤 날짜 계산 (주말은 세지 않음)
 function addBusinessDays(dateStr, days){
   const d = new Date(dateStr + 'T00:00:00');
@@ -4346,9 +4355,9 @@ function autoFillCiFieldsFromGroup(){
     const match = others.find(p => (p[f.key]||'').toString().trim() !== '');
     if(match){ el.value = match[f.key]; filled = true; if(f.key==='etaPlanned') etaJustFilled = true; }
   });
-  // 항구도착예정일이 CI그룹에서 자동으로 채워졌다면 공장입고예정일(+5영업일)도 함께 계산
+  // 항구도착예정일이 CI그룹에서 자동으로 채워졌다면 공장입고예정일(+2영업일)도 함께 계산
   if(etaJustFilled && !poForm.elements['warehousePlanned'].value){
-    poForm.elements['warehousePlanned'].value = addBusinessDays(poForm.elements['etaPlanned'].value, 5);
+    poForm.elements['warehousePlanned'].value = addBusinessDays(poForm.elements['etaPlanned'].value, WH_LEAD_DAYS);
   }
   if(!poForm.elements['balanceDeferred'].checked){
     const match = others.find(p=>p.balanceDeferred);
@@ -4371,8 +4380,8 @@ async function autoSyncCiFields(){
     CI_SYNC_FIELDS.forEach(f=>{
       pos[idx][f.key] = poForm.elements[f.key].value;
     });
-    // 항구도착예정일이 반영됐으니 공장입고예정일(+5영업일)도 같이 재계산
-    pos[idx].warehousePlanned = pos[idx].etaPlanned ? addBusinessDays(pos[idx].etaPlanned, 5) : '';
+    // 항구도착예정일이 반영됐으니 공장입고예정일(+2영업일)도 같이 재계산
+    pos[idx].warehousePlanned = pos[idx].etaPlanned ? addBusinessDays(pos[idx].etaPlanned, WH_LEAD_DAYS) : '';
     pos[idx].balanceDeferred = balanceDeferredVal;
     // 잔금/입고 공유 상태도 날짜값에서 파생되므로 같이 재계산
     const hasBalDate = !!pos[idx].balanceDate;
@@ -4515,10 +4524,10 @@ poForm.addEventListener('input', (e)=>{
   if(e.target.name==='ciNo' || e.target.name==='balanceDeferred' || CI_SYNC_FIELDS.some(f=>f.key===e.target.name)){
     autoSyncCiFields();
   }
-  // 항구 도착 예정일 입력 시 통관(3영업일)+이동(2영업일) = 영업일 5일 뒤로 공장 입고 예정일 자동 계산
+  // 항구 도착 예정일 입력 시 영업일 WH_LEAD_DAYS(2)일 뒤로 공장 입고 예정일 자동 계산
   if(e.target.name==='etaPlanned'){
     if(e.target.value){
-      poForm.elements['warehousePlanned'].value = addBusinessDays(e.target.value, 5);
+      poForm.elements['warehousePlanned'].value = addBusinessDays(e.target.value, WH_LEAD_DAYS);
     }else{
       poForm.elements['warehousePlanned'].value = '';
     }
